@@ -43,3 +43,6 @@ uFrameIndex 28 (FSR resets it to 0 on a history reset), fJitter 40 (render pixel
 
 0.1.0: DLSS replaces accumulate (cs226d3330), writing its u0; RCAS runs as before. One DLSS
 history (FSR alternates its accumulate output texture). Render size = the game's FSR 2 quality.
+
+Confirmed by the user (2026-11-02): looks good. Log: DLSS ran at every FSR 2 quality, 2560x1440,
+2258x1270, 1920x1080 and 1280x720 -> 3840x2160, no fallbacks, default jitter sign.
