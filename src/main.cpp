@@ -794,8 +794,9 @@ void Pass(command_list* cl, bool compute, const std::string& head) {
 }
 
 bool OnDispatch(command_list* cl, uint32_t x, uint32_t y, uint32_t z) {
-    if (Recording()) Pass(cl, true, Format("%u x %u x %u", x, y, z));
-    return false;
+    const bool replaced = rd::UpscalerOnDispatch(cl);
+    if (Recording()) Pass(cl, true, Format("%u x %u x %u%s", x, y, z, replaced ? " (replaced by DLSS)" : ""));
+    return replaced;
 }
 
 bool OnDraw(command_list* cl, uint32_t vertices, uint32_t instances, uint32_t, uint32_t) {
@@ -966,6 +967,8 @@ uint32_t PipelinePs(pipeline pipe) {
     const PipeIds ids = Pipe(pipe);
     return ids.ps ? ids.ps : ids.cs;
 }
+
+uint32_t PipelineCs(pipeline pipe) { return Pipe(pipe).cs; }
 
 resource ViewResource(resource_view view) {
     ViewInfo info;

@@ -183,13 +183,14 @@ bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& in, std::string& er
         error = g_initError.empty() ? "DLSS not started" : g_initError;
         return false;
     }
-    auto it = g_features.find(in.output);
+    ID3D12Resource* const key = in.key ? (ID3D12Resource*)in.key : in.output;
+    auto it = g_features.find(key);
     if (it == g_features.end()) {
         if (g_features.size() >= kMaxFeatures) {
             error = "too many TSR views";
             return false;
         }
-        it = g_features.emplace(in.output, Feature()).first;
+        it = g_features.emplace(key, Feature()).first;
     }
     Feature& f = it->second;
     const bool fresh = !f.handle || in.renderWidth != f.renderW || in.renderHeight != f.renderH ||
@@ -209,7 +210,7 @@ bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& in, std::string& er
     ep.InReset = in.reset || fresh ? 1 : 0;
     ep.InMVScaleX = in.motionScaleX;
     ep.InMVScaleY = in.motionScaleY;
-    ep.InPreExposure = 1.0f;
+    ep.InPreExposure = in.preExposure;
     ep.InExposureScale = 1.0f;
     const NVSDK_NGX_Result r = NGX_D3D12_EVALUATE_DLSS_EXT(list, f.handle, g_params, &ep);
     if (NVSDK_NGX_FAILED(r)) {

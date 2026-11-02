@@ -17,6 +17,8 @@ struct Inputs {
     float jitterX = 0, jitterY = 0;  // in render pixels
     float motionScaleX = 1, motionScaleY = 1;
     bool reset = false;
+    float preExposure = 1;  // the colour was multiplied by this
+    const void* key = nullptr;  // which history (feature) to use; the output texture if null
     int preset = 0;  // NVSDK_NGX_DLSS_Hint_Render_Preset_*
 };
 

@@ -1,0 +1,295 @@
+;
+; Note: shader requires additional functionality:
+;       Typed UAV Load Additional Formats
+;
+;
+; Input signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+;
+; Output signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+; shader debug name: 96ec2a971263b38c5a905c64a7a1cdb3.pdb
+; shader hash: 96ec2a971263b38c5a905c64a7a1cdb3
+;
+; Pipeline Runtime Information: 
+;
+;PSVRuntimeInfo:
+; Compute Shader
+; NumThreads=(8,8,1)
+; MinimumExpectedWaveLaneCount: 0
+; MaximumExpectedWaveLaneCount: 4294967295
+; UsesViewID: false
+; SigInputElements: 0
+; SigOutputElements: 0
+; SigPatchConstOrPrimElements: 0
+; SigInputVectors: 0
+; SigOutputVectors[0]: 0
+; SigOutputVectors[1]: 0
+; SigOutputVectors[2]: 0
+; SigOutputVectors[3]: 0
+;
+;
+; Buffer Definitions:
+;
+; cbuffer cbFSR2
+; {
+;
+;   struct cbFSR2
+;   {
+;
+;       int2 iRenderSize;                             ; Offset:    0
+;       int2 iDisplaySize;                            ; Offset:    8
+;       int2 iLumaMipDimensions;                      ; Offset:   16
+;       int iLumaMipLevelToUse;                       ; Offset:   24
+;       uint uFrameIndex;                             ; Offset:   28
+;       float2 fDisplaySizeRcp;                       ; Offset:   32
+;       float2 fJitter;                               ; Offset:   40
+;       float2 fProjSpaceJitter;                      ; Offset:   48
+;       float2 fPadding;                              ; Offset:   56
+;       float4 fDeviceToViewDepth;                    ; Offset:   64
+;       float2 depthclip_uv_scale;                    ; Offset:   80
+;       float2 postprocessed_lockstatus_uv_scale;     ; Offset:   88
+;       float2 reactive_mask_dim_rcp;                 ; Offset:   96
+;       float2 fDownscaleFactor;                      ; Offset:  104
+;       float fPreExposure;                           ; Offset:  112
+;       float fTanHalfFOV;                            ; Offset:  116
+;       float fJitterSequenceLength;                  ; Offset:  120
+;       float fLockInitialLifetime;                   ; Offset:  124
+;       float fLockTickDelta;                         ; Offset:  128
+;       float fDeltaTime;                             ; Offset:  132
+;       float fDynamicResChangeFactor;                ; Offset:  136
+;       float fLumaMipRcp;                            ; Offset:  140
+;   
+;   } cbFSR2;                                         ; Offset:    0 Size:   144
+;
+; }
+;
+;
+; Resource Bindings:
+;
+; Name                                 Type  Format         Dim      ID      HLSL Bind  Count
+; ------------------------------ ---------- ------- ----------- ------- -------------- ------
+; cbFSR2                            cbuffer      NA          NA     CB0            cb0     1
+; r_input_color_jittered            texture     f32          2d      T0             t0     1
+; r_exposure                        texture     f32          2d      T1             t1     1
+; rw_reconstructed_previous_nearest_depth       UAV     u32          2d      U0             u0     1
+; rw_prepared_input_color               UAVunorm_f32          2d      U1             u1     1
+; rw_luma_history                       UAVunorm_f32          2d      U2             u2     1
+;
+target datalayout = "e-m:e-p:32:32-i1:32-i8:8-i16:16-i32:32-i64:64-f16:16-f32:32-f64:64-n8:16:32:64"
+target triple = "dxil-ms-dx"
+
+%dx.types.Handle = type { i8* }
+%dx.types.ResBind = type { i32, i32, i32, i8 }
+%dx.types.ResourceProperties = type { i32, i32 }
+%dx.types.ResRet.f32 = type { float, float, float, float, i32 }
+%dx.types.CBufRet.f32 = type { float, float, float, float }
+%dx.types.CBufRet.i32 = type { i32, i32, i32, i32 }
+%"class.Texture2D<vector<float, 4> >" = type { <4 x float>, %"class.Texture2D<vector<float, 4> >::mips_type" }
+%"class.Texture2D<vector<float, 4> >::mips_type" = type { i32 }
+%"class.Texture2D<vector<float, 2> >" = type { <2 x float>, %"class.Texture2D<vector<float, 2> >::mips_type" }
+%"class.Texture2D<vector<float, 2> >::mips_type" = type { i32 }
+%"class.RWTexture2D<unsigned int>" = type { i32 }
+%"class.RWTexture2D<vector<float, 4> >" = type { <4 x float> }
+%cbFSR2 = type { <2 x i32>, <2 x i32>, <2 x i32>, i32, i32, <2 x float>, <2 x float>, <2 x float>, <2 x float>, <4 x float>, <2 x float>, <2 x float>, <2 x float>, <2 x float>, float, float, float, float, float, float, float, float }
+
+define void @CS() {
+  %1 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 2, i32 2, i32 0, i8 1 }, i32 2, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %2 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 1 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %3 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 1 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %4 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 0 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %5 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %6 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 2 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %7 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %6, %dx.types.ResourceProperties { i32 13, i32 144 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %8 = call i32 @dx.op.threadId.i32(i32 93, i32 0)  ; ThreadId(component)
+  %9 = call i32 @dx.op.threadId.i32(i32 93, i32 1)  ; ThreadId(component)
+  %10 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %5, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %11 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %10, i32 0, i32 %8, i32 %9, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %12 = extractvalue %dx.types.ResRet.f32 %11, 0
+  %13 = extractvalue %dx.types.ResRet.f32 %11, 1
+  %14 = extractvalue %dx.types.ResRet.f32 %11, 2
+  %15 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 7)  ; CBufferLoadLegacy(handle,regIndex)
+  %16 = extractvalue %dx.types.CBufRet.f32 %15, 0
+  %17 = fdiv fast float %12, %16
+  %18 = fdiv fast float %13, %16
+  %19 = fdiv fast float %14, %16
+  %20 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %17)  ; FMax(a,b)
+  %21 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %18)  ; FMax(a,b)
+  %22 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %19)  ; FMax(a,b)
+  %23 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %4, %dx.types.ResourceProperties { i32 2, i32 521 })  ; AnnotateHandle(res,props)  resource: Texture2D<2xF32>
+  %24 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %23, i32 0, i32 0, i32 0, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %25 = extractvalue %dx.types.ResRet.f32 %24, 0
+  %26 = fcmp fast oeq float %25, 0.000000e+00
+  %27 = select i1 %26, float 1.000000e+00, float %25
+  %28 = fmul fast float %27, %20
+  %29 = fmul fast float %27, %21
+  %30 = fmul fast float %27, %22
+  %31 = call float @dx.op.binary.f32(i32 35, float %29, float %30)  ; FMax(a,b)
+  %32 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %28)  ; FMax(a,b)
+  %33 = call float @dx.op.binary.f32(i32 35, float %32, float %31)  ; FMax(a,b)
+  %34 = fadd fast float %33, 1.000000e+00
+  %35 = fdiv fast float %28, %34
+  %36 = fdiv fast float %29, %34
+  %37 = fdiv fast float %30, %34
+  %38 = fmul fast float %36, 5.000000e-01
+  %39 = fadd fast float %22, %20
+  %40 = fmul fast float %27, %39
+  %41 = fdiv fast float %40, %34
+  %42 = fmul fast float %41, 2.500000e-01
+  %43 = fadd fast float %42, %38
+  %44 = fsub fast float %20, %22
+  %45 = fmul fast float %27, %44
+  %46 = fdiv fast float %45, %34
+  %47 = fmul fast float %46, 5.000000e-01
+  %48 = fmul fast float %35, 2.500000e-01
+  %49 = fmul fast float %37, 2.500000e-01
+  %50 = fadd fast float %47, 5.000000e-01
+  %51 = fsub fast float 5.000000e-01, %48
+  %52 = fadd fast float %51, %38
+  %53 = fsub fast float %52, %49
+  %54 = call float @dx.op.dot3.f32(i32 55, float %35, float %36, float %37, float 0x3FCB367A00000000, float 0x3FE6E2EB20000000, float 0x3FB27BB300000000)  ; Dot3(ax,ay,az,bx,by,bz)
+  %55 = fcmp fast ugt float %54, 0x3F822354E0000000
+  br i1 %55, label %58, label %56
+
+; <label>:56                                      ; preds = %0
+  %57 = fmul fast float %54, 0x408C3A5EE0000000
+  br label %64
+
+; <label>:58                                      ; preds = %0
+  %59 = call float @dx.op.unary.f32(i32 23, float %54)  ; Log(value)
+  %60 = fmul fast float %59, 0x3FD5555560000000
+  %61 = call float @dx.op.unary.f32(i32 21, float %60)  ; Exp(value)
+  %62 = fmul fast float %61, 1.160000e+02
+  %63 = fadd fast float %62, -1.600000e+01
+  br label %64
+
+; <label>:64                                      ; preds = %58, %56
+  %65 = phi float [ %57, %56 ], [ %63, %58 ]
+  %66 = fmul fast float %65, 0x3F847AE140000000
+  %67 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 1038 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xUNormF32>
+  %68 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %67, i32 undef, i32 %8, i32 %9, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %69 = extractvalue %dx.types.ResRet.f32 %68, 0
+  %70 = extractvalue %dx.types.ResRet.f32 %68, 1
+  %71 = extractvalue %dx.types.ResRet.f32 %68, 2
+  %72 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %7, i32 1)  ; CBufferLoadLegacy(handle,regIndex)
+  %73 = extractvalue %dx.types.CBufRet.i32 %72, 3
+  %74 = icmp ugt i32 %73, 3
+  br i1 %74, label %75, label %94
+
+; <label>:75                                      ; preds = %64
+  %76 = call float @dx.op.binary.f32(i32 35, float %71, float %66)  ; FMax(a,b)
+  %77 = fcmp fast une float %76, 0.000000e+00
+  %78 = call float @dx.op.binary.f32(i32 36, float %71, float %66)  ; FMin(a,b)
+  %79 = fdiv fast float %78, %76
+  %80 = select i1 %77, float %79, float 0.000000e+00
+  %81 = call float @dx.op.binary.f32(i32 35, float %70, float %66)  ; FMax(a,b)
+  %82 = fcmp fast une float %81, 0.000000e+00
+  %83 = call float @dx.op.binary.f32(i32 36, float %70, float %66)  ; FMin(a,b)
+  %84 = fdiv fast float %83, %81
+  %85 = select i1 %82, float %84, float 0.000000e+00
+  %86 = call float @dx.op.binary.f32(i32 35, float %69, float %66)  ; FMax(a,b)
+  %87 = fcmp fast une float %86, 0.000000e+00
+  %88 = call float @dx.op.binary.f32(i32 36, float %69, float %66)  ; FMin(a,b)
+  %89 = fdiv fast float %88, %86
+  %90 = select i1 %87, float %89, float 0.000000e+00
+  %91 = call float @dx.op.binary.f32(i32 35, float %90, float %85)  ; FMax(a,b)
+  %92 = fsub fast float %91, %80
+  %93 = call float @dx.op.unary.f32(i32 7, float %92)  ; Saturate(value)
+  br label %94
+
+; <label>:94                                      ; preds = %75, %64
+  %95 = phi float [ %93, %75 ], [ 0.000000e+00, %64 ]
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %67, i32 %8, i32 %9, i32 undef, float %70, float %71, float %66, float %95, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  %96 = call float @dx.op.unary.f32(i32 23, float %66)  ; Log(value)
+  %97 = fmul fast float %96, 0x3FC5555560000000
+  %98 = call float @dx.op.unary.f32(i32 21, float %97)  ; Exp(value)
+  %99 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 4098, i32 1038 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xUNormF32>
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %99, i32 %8, i32 %9, i32 undef, float %43, float %50, float %53, float %98, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  %100 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %7, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %101 = extractvalue %dx.types.CBufRet.i32 %100, 0
+  %102 = extractvalue %dx.types.CBufRet.i32 %100, 1
+  %103 = icmp sgt i32 %101, %8
+  %104 = icmp sgt i32 %102, %9
+  %105 = and i1 %103, %104
+  br i1 %105, label %106, label %108
+
+; <label>:106                                     ; preds = %94
+  %107 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 4098, i32 261 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<U32>
+  call void @dx.op.textureStore.i32(i32 67, %dx.types.Handle %107, i32 %8, i32 %9, i32 undef, i32 0, i32 0, i32 0, i32 0, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  br label %108
+
+; <label>:108                                     ; preds = %106, %94
+  ret void
+}
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.threadId.i32(i32, i32) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.binary.f32(i32, float, float) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.unary.f32(i32, float) #0
+
+; Function Attrs: nounwind
+declare void @dx.op.textureStore.f32(i32, %dx.types.Handle, i32, i32, i32, float, float, float, float, i8) #1
+
+; Function Attrs: nounwind readonly
+declare %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32) #2
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.dot3.f32(i32, float, float, float, float, float, float) #0
+
+; Function Attrs: nounwind
+declare void @dx.op.textureStore.i32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32, i8) #1
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32, %dx.types.Handle, i32) #2
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32, %dx.types.Handle, i32) #2
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.annotateHandle(i32, %dx.types.Handle, %dx.types.ResourceProperties) #0
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.createHandleFromBinding(i32, %dx.types.ResBind, i32, i1) #0
+
+attributes #0 = { nounwind readnone }
+attributes #1 = { nounwind }
+attributes #2 = { nounwind readonly }
+
+!llvm.ident = !{!0}
+!dx.version = !{!1}
+!dx.valver = !{!2}
+!dx.shaderModel = !{!3}
+!dx.resources = !{!4}
+!dx.entryPoints = !{!17}
+
+!0 = !{!"clang version 3.7 (tags/RELEASE_370/final)"}
+!1 = !{i32 1, i32 6}
+!2 = !{i32 1, i32 7}
+!3 = !{!"cs", i32 6, i32 6}
+!4 = !{!5, !9, !15, null}
+!5 = !{!6, !8}
+!6 = !{i32 0, %"class.Texture2D<vector<float, 4> >"* undef, !"", i32 0, i32 0, i32 1, i32 2, i32 0, !7}
+!7 = !{i32 0, i32 9}
+!8 = !{i32 1, %"class.Texture2D<vector<float, 2> >"* undef, !"", i32 0, i32 1, i32 1, i32 2, i32 0, !7}
+!9 = !{!10, !12, !14}
+!10 = !{i32 0, %"class.RWTexture2D<unsigned int>"* undef, !"", i32 0, i32 0, i32 1, i32 2, i1 false, i1 false, i1 false, !11}
+!11 = !{i32 0, i32 5}
+!12 = !{i32 1, %"class.RWTexture2D<vector<float, 4> >"* undef, !"", i32 0, i32 1, i32 1, i32 2, i1 false, i1 false, i1 false, !13}
+!13 = !{i32 0, i32 14}
+!14 = !{i32 2, %"class.RWTexture2D<vector<float, 4> >"* undef, !"", i32 0, i32 2, i32 1, i32 2, i1 false, i1 false, i1 false, !13}
+!15 = !{!16}
+!16 = !{i32 0, %cbFSR2* undef, !"", i32 0, i32 0, i32 1, i32 144, null}
+!17 = !{void ()* @CS, !"CS", null, !4, !18}
+!18 = !{i32 0, i64 8397056, i32 4, !19, i32 5, !20}
+!19 = !{i32 8, i32 8, i32 1}
+!20 = !{i32 0}

@@ -26,3 +26,20 @@ With TAA instead (frame-2): cscd215ebc, ps97d06463, psd9321f67.
 Plan: skip accumulate and RCAS, run DLSS into RCAS's u0 (already a UAV). Inputs: colour #26d94,
 depth (r32f conversion or the original), motion (rg16f conversion) with the scale and jitter from
 FSR 2's constants (next capture: DumpShaders for the FSR 2 passes; bytecode for names).
+
+## FSR 2 constants and inputs (captures/r2, shaders/)
+
+The game's FSR is AMD FSR 2.1 (cbFSR2, 144 bytes, root CBV b0): iRenderSize 0, iDisplaySize 8,
+uFrameIndex 28 (FSR resets it to 0 on a history reset), fJitter 40 (render pixels, e.g.
+-0.469 0.093), fProjSpaceJitter 48, fDeviceToViewDepth 64 (reverse-Z, near 0.01), fPreExposure
+112 (1), fTanHalfFOV 116, fJitterSequenceLength 120 (18).
+
+- CS_UpscalingDepthTranslation (csd2efdab0): plain copy of the depth into r32f (u0).
+- CS_UpscalingVelocityTranslate (cs5469503e): u0 = (velocity.xy - fProjSpaceJitter) * (0.5, -0.5):
+  UV offset from the current to the previous position, y down, jitter removed. DLSS motion scale =
+  render size.
+- RCAS (cs1cfde08a, cbRCAS) reads accumulate's output (t1) and the exposure; it divides and
+  multiplies back, so it only sharpens.
+
+0.1.0: DLSS replaces accumulate (cs226d3330), writing its u0; RCAS runs as before. One DLSS
+history (FSR alternates its accumulate output texture). Render size = the game's FSR 2 quality.

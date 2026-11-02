@@ -15,6 +15,7 @@ std::wstring ExeDir();  // with a trailing backslash
 
 // Shader ids (FNV-1a of the bytecode) of a pipeline: pixel shader for graphics, compute shader.
 uint32_t PipelinePs(reshade::api::pipeline pipe);
+uint32_t PipelineCs(reshade::api::pipeline pipe);  // compute shader id, 0 for graphics
 
 // The resource a view was created for, from the add-on's own map (never asks ReShade about a
 // view whose resource may have been freed).
@@ -24,6 +25,7 @@ reshade::api::resource ViewResource(reshade::api::resource_view view);
 void UpscalerInit();
 void UpscalerShutdown();
 bool UpscalerOnDraw(reshade::api::command_list* cl, uint32_t vertices, uint32_t instances);  // true: draw replaced
+bool UpscalerOnDispatch(reshade::api::command_list* cl);  // true: dispatch replaced
 void UpscalerPresent(reshade::api::swapchain* sc);
 void UpscalerOverlay();
 

@@ -1,0 +1,1097 @@
+;
+; Input signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+;
+; Output signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+; shader debug name: 8564c5b14e9d67992f578c84c71e812c.pdb
+; shader hash: 8564c5b14e9d67992f578c84c71e812c
+;
+; Pipeline Runtime Information: 
+;
+;PSVRuntimeInfo:
+; Compute Shader
+; NumThreads=(64,1,1)
+; MinimumExpectedWaveLaneCount: 0
+; MaximumExpectedWaveLaneCount: 4294967295
+; UsesViewID: false
+; SigInputElements: 0
+; SigOutputElements: 0
+; SigPatchConstOrPrimElements: 0
+; SigInputVectors: 0
+; SigOutputVectors[0]: 0
+; SigOutputVectors[1]: 0
+; SigOutputVectors[2]: 0
+; SigOutputVectors[3]: 0
+;
+;
+; Buffer Definitions:
+;
+; cbuffer cbFSR2
+; {
+;
+;   struct cbFSR2
+;   {
+;
+;       int2 iRenderSize;                             ; Offset:    0
+;       int2 iDisplaySize;                            ; Offset:    8
+;       int2 iLumaMipDimensions;                      ; Offset:   16
+;       int iLumaMipLevelToUse;                       ; Offset:   24
+;       uint uFrameIndex;                             ; Offset:   28
+;       float2 fDisplaySizeRcp;                       ; Offset:   32
+;       float2 fJitter;                               ; Offset:   40
+;       float2 fProjSpaceJitter;                      ; Offset:   48
+;       float2 fPadding;                              ; Offset:   56
+;       float4 fDeviceToViewDepth;                    ; Offset:   64
+;       float2 depthclip_uv_scale;                    ; Offset:   80
+;       float2 postprocessed_lockstatus_uv_scale;     ; Offset:   88
+;       float2 reactive_mask_dim_rcp;                 ; Offset:   96
+;       float2 fDownscaleFactor;                      ; Offset:  104
+;       float fPreExposure;                           ; Offset:  112
+;       float fTanHalfFOV;                            ; Offset:  116
+;       float fJitterSequenceLength;                  ; Offset:  120
+;       float fLockInitialLifetime;                   ; Offset:  124
+;       float fLockTickDelta;                         ; Offset:  128
+;       float fDeltaTime;                             ; Offset:  132
+;       float fDynamicResChangeFactor;                ; Offset:  136
+;       float fLumaMipRcp;                            ; Offset:  140
+;   
+;   } cbFSR2;                                         ; Offset:    0 Size:   144
+;
+; }
+;
+; cbuffer cbRCAS
+; {
+;
+;   struct cbRCAS
+;   {
+;
+;       uint4 rcasConfig;                             ; Offset:    0
+;   
+;   } cbRCAS;                                         ; Offset:    0 Size:    16
+;
+; }
+;
+;
+; Resource Bindings:
+;
+; Name                                 Type  Format         Dim      ID      HLSL Bind  Count
+; ------------------------------ ---------- ------- ----------- ------- -------------- ------
+; cbFSR2                            cbuffer      NA          NA     CB0            cb0     1
+; cbRCAS                            cbuffer      NA          NA     CB1            cb1     1
+; r_exposure                        texture     f32          2d      T0             t0     1
+; r_rcas_input                      texture     f32          2d      T1             t1     1
+; rw_upscaled_output                    UAV     f32          2d      U0             u0     1
+;
+target datalayout = "e-m:e-p:32:32-i1:32-i8:8-i16:16-i32:32-i64:64-f16:16-f32:32-f64:64-n8:16:32:64"
+target triple = "dxil-ms-dx"
+
+%dx.types.Handle = type { i8* }
+%dx.types.ResBind = type { i32, i32, i32, i8 }
+%dx.types.ResourceProperties = type { i32, i32 }
+%dx.types.CBufRet.i32 = type { i32, i32, i32, i32 }
+%dx.types.ResRet.f32 = type { float, float, float, float, i32 }
+%dx.types.CBufRet.f32 = type { float, float, float, float }
+%"class.Texture2D<vector<float, 2> >" = type { <2 x float>, %"class.Texture2D<vector<float, 2> >::mips_type" }
+%"class.Texture2D<vector<float, 2> >::mips_type" = type { i32 }
+%"class.Texture2D<vector<float, 4> >" = type { <4 x float>, %"class.Texture2D<vector<float, 4> >::mips_type" }
+%"class.Texture2D<vector<float, 4> >::mips_type" = type { i32 }
+%"class.RWTexture2D<vector<float, 4> >" = type { <4 x float> }
+%cbFSR2 = type { <2 x i32>, <2 x i32>, <2 x i32>, i32, i32, <2 x float>, <2 x float>, <2 x float>, <2 x float>, <4 x float>, <2 x float>, <2 x float>, <2 x float>, <2 x float>, float, float, float, float, float, float, float, float }
+%cbRCAS = type { <4 x i32> }
+
+define void @CS() {
+  %1 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 1 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %2 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 0 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %3 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %4 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 2 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %5 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 2 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %6 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %4, %dx.types.ResourceProperties { i32 13, i32 16 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %7 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %5, %dx.types.ResourceProperties { i32 13, i32 144 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %8 = call i32 @dx.op.threadIdInGroup.i32(i32 95, i32 0)  ; ThreadIdInGroup(component)
+  %9 = call i32 @dx.op.groupId.i32(i32 94, i32 0)  ; GroupId(component)
+  %10 = call i32 @dx.op.groupId.i32(i32 94, i32 1)  ; GroupId(component)
+  %11 = lshr i32 %8, 1
+  %12 = and i32 %11, 7
+  %13 = lshr i32 %8, 3
+  %14 = and i32 %8, 1
+  %15 = and i32 %13, 6
+  %16 = or i32 %15, %14
+  %17 = shl i32 %9, 4
+  %18 = shl i32 %10, 4
+  %19 = or i32 %12, %17
+  %20 = or i32 %16, %18
+  %21 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %6, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %22 = extractvalue %dx.types.CBufRet.i32 %21, 0
+  %23 = and i32 %19, 65527
+  %24 = and i32 %20, 65527
+  %25 = add nsw i32 %24, -1
+  %26 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %27 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %26, i32 0, i32 %23, i32 %25, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %28 = extractvalue %dx.types.ResRet.f32 %27, 0
+  %29 = extractvalue %dx.types.ResRet.f32 %27, 1
+  %30 = extractvalue %dx.types.ResRet.f32 %27, 2
+  %31 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 521 })  ; AnnotateHandle(res,props)  resource: Texture2D<2xF32>
+  %32 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %31, i32 0, i32 0, i32 0, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %33 = extractvalue %dx.types.ResRet.f32 %32, 0
+  %34 = fcmp fast oeq float %33, 0.000000e+00
+  %35 = select i1 %34, float 1.000000e+00, float %33
+  %36 = fmul fast float %35, %28
+  %37 = fmul fast float %35, %29
+  %38 = fmul fast float %35, %30
+  %39 = call float @dx.op.binary.f32(i32 35, float %37, float %38)  ; FMax(a,b)
+  %40 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %36)  ; FMax(a,b)
+  %41 = call float @dx.op.binary.f32(i32 35, float %40, float %39)  ; FMax(a,b)
+  %42 = fadd fast float %41, 1.000000e+00
+  %43 = fdiv fast float %36, %42
+  %44 = fdiv fast float %37, %42
+  %45 = fdiv fast float %38, %42
+  %46 = add nsw i32 %23, -1
+  %47 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %26, i32 0, i32 %46, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %48 = extractvalue %dx.types.ResRet.f32 %47, 0
+  %49 = extractvalue %dx.types.ResRet.f32 %47, 1
+  %50 = extractvalue %dx.types.ResRet.f32 %47, 2
+  %51 = fmul fast float %35, %48
+  %52 = fmul fast float %35, %49
+  %53 = fmul fast float %35, %50
+  %54 = call float @dx.op.binary.f32(i32 35, float %52, float %53)  ; FMax(a,b)
+  %55 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %51)  ; FMax(a,b)
+  %56 = call float @dx.op.binary.f32(i32 35, float %55, float %54)  ; FMax(a,b)
+  %57 = fadd fast float %56, 1.000000e+00
+  %58 = fdiv fast float %51, %57
+  %59 = fdiv fast float %52, %57
+  %60 = fdiv fast float %53, %57
+  %61 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %26, i32 0, i32 %23, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %62 = extractvalue %dx.types.ResRet.f32 %61, 0
+  %63 = extractvalue %dx.types.ResRet.f32 %61, 1
+  %64 = extractvalue %dx.types.ResRet.f32 %61, 2
+  %65 = fmul fast float %35, %62
+  %66 = fmul fast float %35, %63
+  %67 = fmul fast float %35, %64
+  %68 = call float @dx.op.binary.f32(i32 35, float %66, float %67)  ; FMax(a,b)
+  %69 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %65)  ; FMax(a,b)
+  %70 = call float @dx.op.binary.f32(i32 35, float %69, float %68)  ; FMax(a,b)
+  %71 = fadd fast float %70, 1.000000e+00
+  %72 = fdiv fast float %65, %71
+  %73 = fdiv fast float %66, %71
+  %74 = fdiv fast float %67, %71
+  %75 = add nuw nsw i32 %23, 1
+  %76 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %26, i32 0, i32 %75, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %77 = extractvalue %dx.types.ResRet.f32 %76, 0
+  %78 = extractvalue %dx.types.ResRet.f32 %76, 1
+  %79 = extractvalue %dx.types.ResRet.f32 %76, 2
+  %80 = fmul fast float %35, %77
+  %81 = fmul fast float %35, %78
+  %82 = fmul fast float %35, %79
+  %83 = call float @dx.op.binary.f32(i32 35, float %81, float %82)  ; FMax(a,b)
+  %84 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %80)  ; FMax(a,b)
+  %85 = call float @dx.op.binary.f32(i32 35, float %84, float %83)  ; FMax(a,b)
+  %86 = fadd fast float %85, 1.000000e+00
+  %87 = fdiv fast float %80, %86
+  %88 = fdiv fast float %81, %86
+  %89 = fdiv fast float %82, %86
+  %90 = add nuw nsw i32 %24, 1
+  %91 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %26, i32 0, i32 %23, i32 %90, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %92 = extractvalue %dx.types.ResRet.f32 %91, 0
+  %93 = extractvalue %dx.types.ResRet.f32 %91, 1
+  %94 = extractvalue %dx.types.ResRet.f32 %91, 2
+  %95 = fmul fast float %35, %92
+  %96 = fmul fast float %35, %93
+  %97 = fmul fast float %35, %94
+  %98 = call float @dx.op.binary.f32(i32 35, float %96, float %97)  ; FMax(a,b)
+  %99 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %95)  ; FMax(a,b)
+  %100 = call float @dx.op.binary.f32(i32 35, float %99, float %98)  ; FMax(a,b)
+  %101 = fadd fast float %100, 1.000000e+00
+  %102 = fdiv fast float %95, %101
+  %103 = fdiv fast float %96, %101
+  %104 = fdiv fast float %97, %101
+  %105 = fadd fast float %30, %28
+  %106 = fmul fast float %35, %105
+  %107 = fdiv fast float %106, %42
+  %108 = fmul fast float %107, 5.000000e-01
+  %109 = fadd fast float %108, %44
+  %110 = fadd fast float %50, %48
+  %111 = fmul fast float %35, %110
+  %112 = fdiv fast float %111, %57
+  %113 = fmul fast float %112, 5.000000e-01
+  %114 = fadd fast float %113, %59
+  %115 = fadd fast float %64, %62
+  %116 = fmul fast float %35, %115
+  %117 = fdiv fast float %116, %71
+  %118 = fmul fast float %117, 5.000000e-01
+  %119 = fadd fast float %118, %73
+  %120 = fadd fast float %79, %77
+  %121 = fmul fast float %35, %120
+  %122 = fdiv fast float %121, %86
+  %123 = fmul fast float %122, 5.000000e-01
+  %124 = fadd fast float %123, %88
+  %125 = fadd fast float %94, %92
+  %126 = fmul fast float %35, %125
+  %127 = fdiv fast float %126, %101
+  %128 = fmul fast float %127, 5.000000e-01
+  %129 = fadd fast float %128, %103
+  %130 = fadd fast float %114, %109
+  %131 = fadd fast float %130, %124
+  %132 = fadd fast float %131, %129
+  %133 = fmul fast float %132, 2.500000e-01
+  %134 = fsub fast float %133, %119
+  %135 = call float @dx.op.unary.f32(i32 6, float %134)  ; FAbs(value)
+  %136 = call float @dx.op.binary.f32(i32 35, float %114, float %119)  ; FMax(a,b)
+  %137 = call float @dx.op.binary.f32(i32 35, float %109, float %136)  ; FMax(a,b)
+  %138 = call float @dx.op.binary.f32(i32 35, float %124, float %129)  ; FMax(a,b)
+  %139 = call float @dx.op.binary.f32(i32 35, float %137, float %138)  ; FMax(a,b)
+  %140 = call float @dx.op.binary.f32(i32 36, float %114, float %119)  ; FMin(a,b)
+  %141 = call float @dx.op.binary.f32(i32 36, float %109, float %140)  ; FMin(a,b)
+  %142 = call float @dx.op.binary.f32(i32 36, float %124, float %129)  ; FMin(a,b)
+  %143 = call float @dx.op.binary.f32(i32 36, float %141, float %142)  ; FMin(a,b)
+  %144 = fsub fast float %139, %143
+  %145 = bitcast float %144 to i32
+  %146 = sub i32 2129764351, %145
+  %147 = bitcast i32 %146 to float
+  %148 = fmul fast float %147, %144
+  %149 = fsub fast float 2.000000e+00, %148
+  %150 = fmul fast float %147, %135
+  %151 = fmul fast float %150, %149
+  %152 = call float @dx.op.unary.f32(i32 7, float %151)  ; Saturate(value)
+  %153 = fmul fast float %152, 5.000000e-01
+  %154 = fsub fast float 1.000000e+00, %153
+  %155 = call float @dx.op.binary.f32(i32 36, float %58, float %87)  ; FMin(a,b)
+  %156 = call float @dx.op.binary.f32(i32 36, float %43, float %155)  ; FMin(a,b)
+  %157 = call float @dx.op.binary.f32(i32 36, float %156, float %102)  ; FMin(a,b)
+  %158 = call float @dx.op.binary.f32(i32 36, float %59, float %88)  ; FMin(a,b)
+  %159 = call float @dx.op.binary.f32(i32 36, float %44, float %158)  ; FMin(a,b)
+  %160 = call float @dx.op.binary.f32(i32 36, float %159, float %103)  ; FMin(a,b)
+  %161 = call float @dx.op.binary.f32(i32 36, float %60, float %89)  ; FMin(a,b)
+  %162 = call float @dx.op.binary.f32(i32 36, float %45, float %161)  ; FMin(a,b)
+  %163 = call float @dx.op.binary.f32(i32 36, float %162, float %104)  ; FMin(a,b)
+  %164 = call float @dx.op.binary.f32(i32 35, float %58, float %87)  ; FMax(a,b)
+  %165 = call float @dx.op.binary.f32(i32 35, float %43, float %164)  ; FMax(a,b)
+  %166 = call float @dx.op.binary.f32(i32 35, float %165, float %102)  ; FMax(a,b)
+  %167 = call float @dx.op.binary.f32(i32 35, float %59, float %88)  ; FMax(a,b)
+  %168 = call float @dx.op.binary.f32(i32 35, float %44, float %167)  ; FMax(a,b)
+  %169 = call float @dx.op.binary.f32(i32 35, float %168, float %103)  ; FMax(a,b)
+  %170 = call float @dx.op.binary.f32(i32 35, float %60, float %89)  ; FMax(a,b)
+  %171 = call float @dx.op.binary.f32(i32 35, float %45, float %170)  ; FMax(a,b)
+  %172 = call float @dx.op.binary.f32(i32 35, float %171, float %104)  ; FMax(a,b)
+  %173 = fdiv fast float 2.500000e-01, %166
+  %174 = fdiv fast float 2.500000e-01, %169
+  %175 = fdiv fast float 2.500000e-01, %172
+  %176 = fsub fast float 1.000000e+00, %166
+  %177 = fmul fast float %157, 4.000000e+00
+  %178 = fadd fast float %177, -4.000000e+00
+  %179 = fdiv fast float 1.000000e+00, %178
+  %180 = fmul fast float %179, %176
+  %181 = fsub fast float 1.000000e+00, %169
+  %182 = fmul fast float %160, 4.000000e+00
+  %183 = fadd fast float %182, -4.000000e+00
+  %184 = fdiv fast float 1.000000e+00, %183
+  %185 = fmul fast float %184, %181
+  %186 = fsub fast float 1.000000e+00, %172
+  %187 = fmul fast float %163, 4.000000e+00
+  %188 = fadd fast float %187, -4.000000e+00
+  %189 = fdiv fast float 1.000000e+00, %188
+  %190 = fmul fast float %189, %186
+  %191 = fmul fast float %157, %173
+  %192 = fsub fast float -0.000000e+00, %191
+  %193 = call float @dx.op.binary.f32(i32 35, float %192, float %180)  ; FMax(a,b)
+  %194 = fmul fast float %160, %174
+  %195 = fsub fast float -0.000000e+00, %194
+  %196 = call float @dx.op.binary.f32(i32 35, float %195, float %185)  ; FMax(a,b)
+  %197 = fmul fast float %163, %175
+  %198 = fsub fast float -0.000000e+00, %197
+  %199 = call float @dx.op.binary.f32(i32 35, float %198, float %190)  ; FMax(a,b)
+  %200 = call float @dx.op.binary.f32(i32 35, float %196, float %199)  ; FMax(a,b)
+  %201 = call float @dx.op.binary.f32(i32 35, float %193, float %200)  ; FMax(a,b)
+  %202 = call float @dx.op.binary.f32(i32 36, float %201, float 0.000000e+00)  ; FMin(a,b)
+  %203 = call float @dx.op.binary.f32(i32 35, float -1.875000e-01, float %202)  ; FMax(a,b)
+  %204 = bitcast i32 %22 to float
+  %205 = fmul fast float %154, %204
+  %206 = fmul fast float %205, %203
+  %207 = fmul fast float %206, 4.000000e+00
+  %208 = fadd fast float %207, 1.000000e+00
+  %209 = bitcast float %208 to i32
+  %210 = sub i32 2129764351, %209
+  %211 = bitcast i32 %210 to float
+  %212 = fmul fast float %211, %208
+  %213 = fsub fast float 2.000000e+00, %212
+  %214 = fmul fast float %213, %211
+  %215 = fadd fast float %58, %43
+  %216 = fadd fast float %215, %87
+  %217 = fadd fast float %216, %102
+  %218 = fmul fast float %206, %217
+  %219 = fadd fast float %218, %72
+  %220 = fmul fast float %214, %219
+  %221 = fadd fast float %59, %44
+  %222 = fadd fast float %221, %88
+  %223 = fadd fast float %222, %103
+  %224 = fmul fast float %206, %223
+  %225 = fadd fast float %224, %73
+  %226 = fmul fast float %214, %225
+  %227 = fadd fast float %60, %45
+  %228 = fadd fast float %227, %89
+  %229 = fadd fast float %228, %104
+  %230 = fmul fast float %206, %229
+  %231 = fadd fast float %230, %74
+  %232 = fmul fast float %214, %231
+  %233 = call float @dx.op.binary.f32(i32 35, float %226, float %232)  ; FMax(a,b)
+  %234 = call float @dx.op.binary.f32(i32 35, float %220, float %233)  ; FMax(a,b)
+  %235 = fsub fast float 1.000000e+00, %234
+  %236 = call float @dx.op.binary.f32(i32 35, float 0x3F50624DE0000000, float %235)  ; FMax(a,b)
+  %237 = fmul fast float %35, %236
+  %238 = fdiv fast float %220, %237
+  %239 = fdiv fast float %226, %237
+  %240 = fdiv fast float %232, %237
+  %241 = shl i32 %19, 16
+  %242 = ashr exact i32 %241, 16
+  %243 = shl i32 %20, 16
+  %244 = ashr exact i32 %243, 16
+  %245 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 7)  ; CBufferLoadLegacy(handle,regIndex)
+  %246 = extractvalue %dx.types.CBufRet.f32 %245, 0
+  %247 = fmul fast float %246, %238
+  %248 = fmul fast float %246, %239
+  %249 = fmul fast float %246, %240
+  %250 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 1033 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xF32>
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %250, i32 %242, i32 %244, i32 undef, float %247, float %248, float %249, float 1.000000e+00, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  %251 = or i32 %19, 8
+  %252 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %6, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %253 = extractvalue %dx.types.CBufRet.i32 %252, 0
+  %254 = and i32 %251, 65535
+  %255 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %256 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %255, i32 0, i32 %254, i32 %25, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %257 = extractvalue %dx.types.ResRet.f32 %256, 0
+  %258 = extractvalue %dx.types.ResRet.f32 %256, 1
+  %259 = extractvalue %dx.types.ResRet.f32 %256, 2
+  %260 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 521 })  ; AnnotateHandle(res,props)  resource: Texture2D<2xF32>
+  %261 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %260, i32 0, i32 0, i32 0, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %262 = extractvalue %dx.types.ResRet.f32 %261, 0
+  %263 = fcmp fast oeq float %262, 0.000000e+00
+  %264 = select i1 %263, float 1.000000e+00, float %262
+  %265 = fmul fast float %264, %257
+  %266 = fmul fast float %264, %258
+  %267 = fmul fast float %264, %259
+  %268 = call float @dx.op.binary.f32(i32 35, float %266, float %267)  ; FMax(a,b)
+  %269 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %265)  ; FMax(a,b)
+  %270 = call float @dx.op.binary.f32(i32 35, float %269, float %268)  ; FMax(a,b)
+  %271 = fadd fast float %270, 1.000000e+00
+  %272 = fdiv fast float %265, %271
+  %273 = fdiv fast float %266, %271
+  %274 = fdiv fast float %267, %271
+  %275 = add nsw i32 %254, -1
+  %276 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %255, i32 0, i32 %275, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %277 = extractvalue %dx.types.ResRet.f32 %276, 0
+  %278 = extractvalue %dx.types.ResRet.f32 %276, 1
+  %279 = extractvalue %dx.types.ResRet.f32 %276, 2
+  %280 = fmul fast float %264, %277
+  %281 = fmul fast float %264, %278
+  %282 = fmul fast float %264, %279
+  %283 = call float @dx.op.binary.f32(i32 35, float %281, float %282)  ; FMax(a,b)
+  %284 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %280)  ; FMax(a,b)
+  %285 = call float @dx.op.binary.f32(i32 35, float %284, float %283)  ; FMax(a,b)
+  %286 = fadd fast float %285, 1.000000e+00
+  %287 = fdiv fast float %280, %286
+  %288 = fdiv fast float %281, %286
+  %289 = fdiv fast float %282, %286
+  %290 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %255, i32 0, i32 %254, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %291 = extractvalue %dx.types.ResRet.f32 %290, 0
+  %292 = extractvalue %dx.types.ResRet.f32 %290, 1
+  %293 = extractvalue %dx.types.ResRet.f32 %290, 2
+  %294 = fmul fast float %264, %291
+  %295 = fmul fast float %264, %292
+  %296 = fmul fast float %264, %293
+  %297 = call float @dx.op.binary.f32(i32 35, float %295, float %296)  ; FMax(a,b)
+  %298 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %294)  ; FMax(a,b)
+  %299 = call float @dx.op.binary.f32(i32 35, float %298, float %297)  ; FMax(a,b)
+  %300 = fadd fast float %299, 1.000000e+00
+  %301 = fdiv fast float %294, %300
+  %302 = fdiv fast float %295, %300
+  %303 = fdiv fast float %296, %300
+  %304 = add nuw nsw i32 %254, 1
+  %305 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %255, i32 0, i32 %304, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %306 = extractvalue %dx.types.ResRet.f32 %305, 0
+  %307 = extractvalue %dx.types.ResRet.f32 %305, 1
+  %308 = extractvalue %dx.types.ResRet.f32 %305, 2
+  %309 = fmul fast float %264, %306
+  %310 = fmul fast float %264, %307
+  %311 = fmul fast float %264, %308
+  %312 = call float @dx.op.binary.f32(i32 35, float %310, float %311)  ; FMax(a,b)
+  %313 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %309)  ; FMax(a,b)
+  %314 = call float @dx.op.binary.f32(i32 35, float %313, float %312)  ; FMax(a,b)
+  %315 = fadd fast float %314, 1.000000e+00
+  %316 = fdiv fast float %309, %315
+  %317 = fdiv fast float %310, %315
+  %318 = fdiv fast float %311, %315
+  %319 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %255, i32 0, i32 %254, i32 %90, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %320 = extractvalue %dx.types.ResRet.f32 %319, 0
+  %321 = extractvalue %dx.types.ResRet.f32 %319, 1
+  %322 = extractvalue %dx.types.ResRet.f32 %319, 2
+  %323 = fmul fast float %264, %320
+  %324 = fmul fast float %264, %321
+  %325 = fmul fast float %264, %322
+  %326 = call float @dx.op.binary.f32(i32 35, float %324, float %325)  ; FMax(a,b)
+  %327 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %323)  ; FMax(a,b)
+  %328 = call float @dx.op.binary.f32(i32 35, float %327, float %326)  ; FMax(a,b)
+  %329 = fadd fast float %328, 1.000000e+00
+  %330 = fdiv fast float %323, %329
+  %331 = fdiv fast float %324, %329
+  %332 = fdiv fast float %325, %329
+  %333 = fadd fast float %259, %257
+  %334 = fmul fast float %264, %333
+  %335 = fdiv fast float %334, %271
+  %336 = fmul fast float %335, 5.000000e-01
+  %337 = fadd fast float %336, %273
+  %338 = fadd fast float %279, %277
+  %339 = fmul fast float %264, %338
+  %340 = fdiv fast float %339, %286
+  %341 = fmul fast float %340, 5.000000e-01
+  %342 = fadd fast float %341, %288
+  %343 = fadd fast float %293, %291
+  %344 = fmul fast float %264, %343
+  %345 = fdiv fast float %344, %300
+  %346 = fmul fast float %345, 5.000000e-01
+  %347 = fadd fast float %346, %302
+  %348 = fadd fast float %308, %306
+  %349 = fmul fast float %264, %348
+  %350 = fdiv fast float %349, %315
+  %351 = fmul fast float %350, 5.000000e-01
+  %352 = fadd fast float %351, %317
+  %353 = fadd fast float %322, %320
+  %354 = fmul fast float %264, %353
+  %355 = fdiv fast float %354, %329
+  %356 = fmul fast float %355, 5.000000e-01
+  %357 = fadd fast float %356, %331
+  %358 = fadd fast float %342, %337
+  %359 = fadd fast float %358, %352
+  %360 = fadd fast float %359, %357
+  %361 = fmul fast float %360, 2.500000e-01
+  %362 = fsub fast float %361, %347
+  %363 = call float @dx.op.unary.f32(i32 6, float %362)  ; FAbs(value)
+  %364 = call float @dx.op.binary.f32(i32 35, float %342, float %347)  ; FMax(a,b)
+  %365 = call float @dx.op.binary.f32(i32 35, float %337, float %364)  ; FMax(a,b)
+  %366 = call float @dx.op.binary.f32(i32 35, float %352, float %357)  ; FMax(a,b)
+  %367 = call float @dx.op.binary.f32(i32 35, float %365, float %366)  ; FMax(a,b)
+  %368 = call float @dx.op.binary.f32(i32 36, float %342, float %347)  ; FMin(a,b)
+  %369 = call float @dx.op.binary.f32(i32 36, float %337, float %368)  ; FMin(a,b)
+  %370 = call float @dx.op.binary.f32(i32 36, float %352, float %357)  ; FMin(a,b)
+  %371 = call float @dx.op.binary.f32(i32 36, float %369, float %370)  ; FMin(a,b)
+  %372 = fsub fast float %367, %371
+  %373 = bitcast float %372 to i32
+  %374 = sub i32 2129764351, %373
+  %375 = bitcast i32 %374 to float
+  %376 = fmul fast float %375, %372
+  %377 = fsub fast float 2.000000e+00, %376
+  %378 = fmul fast float %375, %363
+  %379 = fmul fast float %378, %377
+  %380 = call float @dx.op.unary.f32(i32 7, float %379)  ; Saturate(value)
+  %381 = fmul fast float %380, 5.000000e-01
+  %382 = fsub fast float 1.000000e+00, %381
+  %383 = call float @dx.op.binary.f32(i32 36, float %287, float %316)  ; FMin(a,b)
+  %384 = call float @dx.op.binary.f32(i32 36, float %272, float %383)  ; FMin(a,b)
+  %385 = call float @dx.op.binary.f32(i32 36, float %384, float %330)  ; FMin(a,b)
+  %386 = call float @dx.op.binary.f32(i32 36, float %288, float %317)  ; FMin(a,b)
+  %387 = call float @dx.op.binary.f32(i32 36, float %273, float %386)  ; FMin(a,b)
+  %388 = call float @dx.op.binary.f32(i32 36, float %387, float %331)  ; FMin(a,b)
+  %389 = call float @dx.op.binary.f32(i32 36, float %289, float %318)  ; FMin(a,b)
+  %390 = call float @dx.op.binary.f32(i32 36, float %274, float %389)  ; FMin(a,b)
+  %391 = call float @dx.op.binary.f32(i32 36, float %390, float %332)  ; FMin(a,b)
+  %392 = call float @dx.op.binary.f32(i32 35, float %287, float %316)  ; FMax(a,b)
+  %393 = call float @dx.op.binary.f32(i32 35, float %272, float %392)  ; FMax(a,b)
+  %394 = call float @dx.op.binary.f32(i32 35, float %393, float %330)  ; FMax(a,b)
+  %395 = call float @dx.op.binary.f32(i32 35, float %288, float %317)  ; FMax(a,b)
+  %396 = call float @dx.op.binary.f32(i32 35, float %273, float %395)  ; FMax(a,b)
+  %397 = call float @dx.op.binary.f32(i32 35, float %396, float %331)  ; FMax(a,b)
+  %398 = call float @dx.op.binary.f32(i32 35, float %289, float %318)  ; FMax(a,b)
+  %399 = call float @dx.op.binary.f32(i32 35, float %274, float %398)  ; FMax(a,b)
+  %400 = call float @dx.op.binary.f32(i32 35, float %399, float %332)  ; FMax(a,b)
+  %401 = fdiv fast float 2.500000e-01, %394
+  %402 = fdiv fast float 2.500000e-01, %397
+  %403 = fdiv fast float 2.500000e-01, %400
+  %404 = fsub fast float 1.000000e+00, %394
+  %405 = fmul fast float %385, 4.000000e+00
+  %406 = fadd fast float %405, -4.000000e+00
+  %407 = fdiv fast float 1.000000e+00, %406
+  %408 = fmul fast float %407, %404
+  %409 = fsub fast float 1.000000e+00, %397
+  %410 = fmul fast float %388, 4.000000e+00
+  %411 = fadd fast float %410, -4.000000e+00
+  %412 = fdiv fast float 1.000000e+00, %411
+  %413 = fmul fast float %412, %409
+  %414 = fsub fast float 1.000000e+00, %400
+  %415 = fmul fast float %391, 4.000000e+00
+  %416 = fadd fast float %415, -4.000000e+00
+  %417 = fdiv fast float 1.000000e+00, %416
+  %418 = fmul fast float %417, %414
+  %419 = fmul fast float %385, %401
+  %420 = fsub fast float -0.000000e+00, %419
+  %421 = call float @dx.op.binary.f32(i32 35, float %420, float %408)  ; FMax(a,b)
+  %422 = fmul fast float %388, %402
+  %423 = fsub fast float -0.000000e+00, %422
+  %424 = call float @dx.op.binary.f32(i32 35, float %423, float %413)  ; FMax(a,b)
+  %425 = fmul fast float %391, %403
+  %426 = fsub fast float -0.000000e+00, %425
+  %427 = call float @dx.op.binary.f32(i32 35, float %426, float %418)  ; FMax(a,b)
+  %428 = call float @dx.op.binary.f32(i32 35, float %424, float %427)  ; FMax(a,b)
+  %429 = call float @dx.op.binary.f32(i32 35, float %421, float %428)  ; FMax(a,b)
+  %430 = call float @dx.op.binary.f32(i32 36, float %429, float 0.000000e+00)  ; FMin(a,b)
+  %431 = call float @dx.op.binary.f32(i32 35, float -1.875000e-01, float %430)  ; FMax(a,b)
+  %432 = bitcast i32 %253 to float
+  %433 = fmul fast float %382, %432
+  %434 = fmul fast float %433, %431
+  %435 = fmul fast float %434, 4.000000e+00
+  %436 = fadd fast float %435, 1.000000e+00
+  %437 = bitcast float %436 to i32
+  %438 = sub i32 2129764351, %437
+  %439 = bitcast i32 %438 to float
+  %440 = fmul fast float %439, %436
+  %441 = fsub fast float 2.000000e+00, %440
+  %442 = fmul fast float %441, %439
+  %443 = fadd fast float %287, %272
+  %444 = fadd fast float %443, %316
+  %445 = fadd fast float %444, %330
+  %446 = fmul fast float %434, %445
+  %447 = fadd fast float %446, %301
+  %448 = fmul fast float %442, %447
+  %449 = fadd fast float %288, %273
+  %450 = fadd fast float %449, %317
+  %451 = fadd fast float %450, %331
+  %452 = fmul fast float %434, %451
+  %453 = fadd fast float %452, %302
+  %454 = fmul fast float %442, %453
+  %455 = fadd fast float %289, %274
+  %456 = fadd fast float %455, %318
+  %457 = fadd fast float %456, %332
+  %458 = fmul fast float %434, %457
+  %459 = fadd fast float %458, %303
+  %460 = fmul fast float %442, %459
+  %461 = call float @dx.op.binary.f32(i32 35, float %454, float %460)  ; FMax(a,b)
+  %462 = call float @dx.op.binary.f32(i32 35, float %448, float %461)  ; FMax(a,b)
+  %463 = fsub fast float 1.000000e+00, %462
+  %464 = call float @dx.op.binary.f32(i32 35, float 0x3F50624DE0000000, float %463)  ; FMax(a,b)
+  %465 = fmul fast float %264, %464
+  %466 = fdiv fast float %448, %465
+  %467 = fdiv fast float %454, %465
+  %468 = fdiv fast float %460, %465
+  %469 = shl i32 %251, 16
+  %470 = ashr exact i32 %469, 16
+  %471 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 7)  ; CBufferLoadLegacy(handle,regIndex)
+  %472 = extractvalue %dx.types.CBufRet.f32 %471, 0
+  %473 = fmul fast float %472, %466
+  %474 = fmul fast float %472, %467
+  %475 = fmul fast float %472, %468
+  %476 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 1033 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xF32>
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %476, i32 %470, i32 %244, i32 undef, float %473, float %474, float %475, float 1.000000e+00, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  %477 = or i32 %20, 8
+  %478 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %6, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %479 = extractvalue %dx.types.CBufRet.i32 %478, 0
+  %480 = and i32 %477, 65535
+  %481 = add nsw i32 %480, -1
+  %482 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %483 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %482, i32 0, i32 %254, i32 %481, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %484 = extractvalue %dx.types.ResRet.f32 %483, 0
+  %485 = extractvalue %dx.types.ResRet.f32 %483, 1
+  %486 = extractvalue %dx.types.ResRet.f32 %483, 2
+  %487 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 521 })  ; AnnotateHandle(res,props)  resource: Texture2D<2xF32>
+  %488 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %487, i32 0, i32 0, i32 0, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %489 = extractvalue %dx.types.ResRet.f32 %488, 0
+  %490 = fcmp fast oeq float %489, 0.000000e+00
+  %491 = select i1 %490, float 1.000000e+00, float %489
+  %492 = fmul fast float %491, %484
+  %493 = fmul fast float %491, %485
+  %494 = fmul fast float %491, %486
+  %495 = call float @dx.op.binary.f32(i32 35, float %493, float %494)  ; FMax(a,b)
+  %496 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %492)  ; FMax(a,b)
+  %497 = call float @dx.op.binary.f32(i32 35, float %496, float %495)  ; FMax(a,b)
+  %498 = fadd fast float %497, 1.000000e+00
+  %499 = fdiv fast float %492, %498
+  %500 = fdiv fast float %493, %498
+  %501 = fdiv fast float %494, %498
+  %502 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %482, i32 0, i32 %275, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %503 = extractvalue %dx.types.ResRet.f32 %502, 0
+  %504 = extractvalue %dx.types.ResRet.f32 %502, 1
+  %505 = extractvalue %dx.types.ResRet.f32 %502, 2
+  %506 = fmul fast float %491, %503
+  %507 = fmul fast float %491, %504
+  %508 = fmul fast float %491, %505
+  %509 = call float @dx.op.binary.f32(i32 35, float %507, float %508)  ; FMax(a,b)
+  %510 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %506)  ; FMax(a,b)
+  %511 = call float @dx.op.binary.f32(i32 35, float %510, float %509)  ; FMax(a,b)
+  %512 = fadd fast float %511, 1.000000e+00
+  %513 = fdiv fast float %506, %512
+  %514 = fdiv fast float %507, %512
+  %515 = fdiv fast float %508, %512
+  %516 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %482, i32 0, i32 %254, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %517 = extractvalue %dx.types.ResRet.f32 %516, 0
+  %518 = extractvalue %dx.types.ResRet.f32 %516, 1
+  %519 = extractvalue %dx.types.ResRet.f32 %516, 2
+  %520 = fmul fast float %491, %517
+  %521 = fmul fast float %491, %518
+  %522 = fmul fast float %491, %519
+  %523 = call float @dx.op.binary.f32(i32 35, float %521, float %522)  ; FMax(a,b)
+  %524 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %520)  ; FMax(a,b)
+  %525 = call float @dx.op.binary.f32(i32 35, float %524, float %523)  ; FMax(a,b)
+  %526 = fadd fast float %525, 1.000000e+00
+  %527 = fdiv fast float %520, %526
+  %528 = fdiv fast float %521, %526
+  %529 = fdiv fast float %522, %526
+  %530 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %482, i32 0, i32 %304, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %531 = extractvalue %dx.types.ResRet.f32 %530, 0
+  %532 = extractvalue %dx.types.ResRet.f32 %530, 1
+  %533 = extractvalue %dx.types.ResRet.f32 %530, 2
+  %534 = fmul fast float %491, %531
+  %535 = fmul fast float %491, %532
+  %536 = fmul fast float %491, %533
+  %537 = call float @dx.op.binary.f32(i32 35, float %535, float %536)  ; FMax(a,b)
+  %538 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %534)  ; FMax(a,b)
+  %539 = call float @dx.op.binary.f32(i32 35, float %538, float %537)  ; FMax(a,b)
+  %540 = fadd fast float %539, 1.000000e+00
+  %541 = fdiv fast float %534, %540
+  %542 = fdiv fast float %535, %540
+  %543 = fdiv fast float %536, %540
+  %544 = add nuw nsw i32 %480, 1
+  %545 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %482, i32 0, i32 %254, i32 %544, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %546 = extractvalue %dx.types.ResRet.f32 %545, 0
+  %547 = extractvalue %dx.types.ResRet.f32 %545, 1
+  %548 = extractvalue %dx.types.ResRet.f32 %545, 2
+  %549 = fmul fast float %491, %546
+  %550 = fmul fast float %491, %547
+  %551 = fmul fast float %491, %548
+  %552 = call float @dx.op.binary.f32(i32 35, float %550, float %551)  ; FMax(a,b)
+  %553 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %549)  ; FMax(a,b)
+  %554 = call float @dx.op.binary.f32(i32 35, float %553, float %552)  ; FMax(a,b)
+  %555 = fadd fast float %554, 1.000000e+00
+  %556 = fdiv fast float %549, %555
+  %557 = fdiv fast float %550, %555
+  %558 = fdiv fast float %551, %555
+  %559 = fadd fast float %486, %484
+  %560 = fmul fast float %491, %559
+  %561 = fdiv fast float %560, %498
+  %562 = fmul fast float %561, 5.000000e-01
+  %563 = fadd fast float %562, %500
+  %564 = fadd fast float %505, %503
+  %565 = fmul fast float %491, %564
+  %566 = fdiv fast float %565, %512
+  %567 = fmul fast float %566, 5.000000e-01
+  %568 = fadd fast float %567, %514
+  %569 = fadd fast float %519, %517
+  %570 = fmul fast float %491, %569
+  %571 = fdiv fast float %570, %526
+  %572 = fmul fast float %571, 5.000000e-01
+  %573 = fadd fast float %572, %528
+  %574 = fadd fast float %533, %531
+  %575 = fmul fast float %491, %574
+  %576 = fdiv fast float %575, %540
+  %577 = fmul fast float %576, 5.000000e-01
+  %578 = fadd fast float %577, %542
+  %579 = fadd fast float %548, %546
+  %580 = fmul fast float %491, %579
+  %581 = fdiv fast float %580, %555
+  %582 = fmul fast float %581, 5.000000e-01
+  %583 = fadd fast float %582, %557
+  %584 = fadd fast float %568, %563
+  %585 = fadd fast float %584, %578
+  %586 = fadd fast float %585, %583
+  %587 = fmul fast float %586, 2.500000e-01
+  %588 = fsub fast float %587, %573
+  %589 = call float @dx.op.unary.f32(i32 6, float %588)  ; FAbs(value)
+  %590 = call float @dx.op.binary.f32(i32 35, float %568, float %573)  ; FMax(a,b)
+  %591 = call float @dx.op.binary.f32(i32 35, float %563, float %590)  ; FMax(a,b)
+  %592 = call float @dx.op.binary.f32(i32 35, float %578, float %583)  ; FMax(a,b)
+  %593 = call float @dx.op.binary.f32(i32 35, float %591, float %592)  ; FMax(a,b)
+  %594 = call float @dx.op.binary.f32(i32 36, float %568, float %573)  ; FMin(a,b)
+  %595 = call float @dx.op.binary.f32(i32 36, float %563, float %594)  ; FMin(a,b)
+  %596 = call float @dx.op.binary.f32(i32 36, float %578, float %583)  ; FMin(a,b)
+  %597 = call float @dx.op.binary.f32(i32 36, float %595, float %596)  ; FMin(a,b)
+  %598 = fsub fast float %593, %597
+  %599 = bitcast float %598 to i32
+  %600 = sub i32 2129764351, %599
+  %601 = bitcast i32 %600 to float
+  %602 = fmul fast float %601, %598
+  %603 = fsub fast float 2.000000e+00, %602
+  %604 = fmul fast float %601, %589
+  %605 = fmul fast float %604, %603
+  %606 = call float @dx.op.unary.f32(i32 7, float %605)  ; Saturate(value)
+  %607 = fmul fast float %606, 5.000000e-01
+  %608 = fsub fast float 1.000000e+00, %607
+  %609 = call float @dx.op.binary.f32(i32 36, float %513, float %541)  ; FMin(a,b)
+  %610 = call float @dx.op.binary.f32(i32 36, float %499, float %609)  ; FMin(a,b)
+  %611 = call float @dx.op.binary.f32(i32 36, float %610, float %556)  ; FMin(a,b)
+  %612 = call float @dx.op.binary.f32(i32 36, float %514, float %542)  ; FMin(a,b)
+  %613 = call float @dx.op.binary.f32(i32 36, float %500, float %612)  ; FMin(a,b)
+  %614 = call float @dx.op.binary.f32(i32 36, float %613, float %557)  ; FMin(a,b)
+  %615 = call float @dx.op.binary.f32(i32 36, float %515, float %543)  ; FMin(a,b)
+  %616 = call float @dx.op.binary.f32(i32 36, float %501, float %615)  ; FMin(a,b)
+  %617 = call float @dx.op.binary.f32(i32 36, float %616, float %558)  ; FMin(a,b)
+  %618 = call float @dx.op.binary.f32(i32 35, float %513, float %541)  ; FMax(a,b)
+  %619 = call float @dx.op.binary.f32(i32 35, float %499, float %618)  ; FMax(a,b)
+  %620 = call float @dx.op.binary.f32(i32 35, float %619, float %556)  ; FMax(a,b)
+  %621 = call float @dx.op.binary.f32(i32 35, float %514, float %542)  ; FMax(a,b)
+  %622 = call float @dx.op.binary.f32(i32 35, float %500, float %621)  ; FMax(a,b)
+  %623 = call float @dx.op.binary.f32(i32 35, float %622, float %557)  ; FMax(a,b)
+  %624 = call float @dx.op.binary.f32(i32 35, float %515, float %543)  ; FMax(a,b)
+  %625 = call float @dx.op.binary.f32(i32 35, float %501, float %624)  ; FMax(a,b)
+  %626 = call float @dx.op.binary.f32(i32 35, float %625, float %558)  ; FMax(a,b)
+  %627 = fdiv fast float 2.500000e-01, %620
+  %628 = fdiv fast float 2.500000e-01, %623
+  %629 = fdiv fast float 2.500000e-01, %626
+  %630 = fsub fast float 1.000000e+00, %620
+  %631 = fmul fast float %611, 4.000000e+00
+  %632 = fadd fast float %631, -4.000000e+00
+  %633 = fdiv fast float 1.000000e+00, %632
+  %634 = fmul fast float %633, %630
+  %635 = fsub fast float 1.000000e+00, %623
+  %636 = fmul fast float %614, 4.000000e+00
+  %637 = fadd fast float %636, -4.000000e+00
+  %638 = fdiv fast float 1.000000e+00, %637
+  %639 = fmul fast float %638, %635
+  %640 = fsub fast float 1.000000e+00, %626
+  %641 = fmul fast float %617, 4.000000e+00
+  %642 = fadd fast float %641, -4.000000e+00
+  %643 = fdiv fast float 1.000000e+00, %642
+  %644 = fmul fast float %643, %640
+  %645 = fmul fast float %611, %627
+  %646 = fsub fast float -0.000000e+00, %645
+  %647 = call float @dx.op.binary.f32(i32 35, float %646, float %634)  ; FMax(a,b)
+  %648 = fmul fast float %614, %628
+  %649 = fsub fast float -0.000000e+00, %648
+  %650 = call float @dx.op.binary.f32(i32 35, float %649, float %639)  ; FMax(a,b)
+  %651 = fmul fast float %617, %629
+  %652 = fsub fast float -0.000000e+00, %651
+  %653 = call float @dx.op.binary.f32(i32 35, float %652, float %644)  ; FMax(a,b)
+  %654 = call float @dx.op.binary.f32(i32 35, float %650, float %653)  ; FMax(a,b)
+  %655 = call float @dx.op.binary.f32(i32 35, float %647, float %654)  ; FMax(a,b)
+  %656 = call float @dx.op.binary.f32(i32 36, float %655, float 0.000000e+00)  ; FMin(a,b)
+  %657 = call float @dx.op.binary.f32(i32 35, float -1.875000e-01, float %656)  ; FMax(a,b)
+  %658 = bitcast i32 %479 to float
+  %659 = fmul fast float %608, %658
+  %660 = fmul fast float %659, %657
+  %661 = fmul fast float %660, 4.000000e+00
+  %662 = fadd fast float %661, 1.000000e+00
+  %663 = bitcast float %662 to i32
+  %664 = sub i32 2129764351, %663
+  %665 = bitcast i32 %664 to float
+  %666 = fmul fast float %665, %662
+  %667 = fsub fast float 2.000000e+00, %666
+  %668 = fmul fast float %667, %665
+  %669 = fadd fast float %513, %499
+  %670 = fadd fast float %669, %541
+  %671 = fadd fast float %670, %556
+  %672 = fmul fast float %660, %671
+  %673 = fadd fast float %672, %527
+  %674 = fmul fast float %668, %673
+  %675 = fadd fast float %514, %500
+  %676 = fadd fast float %675, %542
+  %677 = fadd fast float %676, %557
+  %678 = fmul fast float %660, %677
+  %679 = fadd fast float %678, %528
+  %680 = fmul fast float %668, %679
+  %681 = fadd fast float %515, %501
+  %682 = fadd fast float %681, %543
+  %683 = fadd fast float %682, %558
+  %684 = fmul fast float %660, %683
+  %685 = fadd fast float %684, %529
+  %686 = fmul fast float %668, %685
+  %687 = call float @dx.op.binary.f32(i32 35, float %680, float %686)  ; FMax(a,b)
+  %688 = call float @dx.op.binary.f32(i32 35, float %674, float %687)  ; FMax(a,b)
+  %689 = fsub fast float 1.000000e+00, %688
+  %690 = call float @dx.op.binary.f32(i32 35, float 0x3F50624DE0000000, float %689)  ; FMax(a,b)
+  %691 = fmul fast float %491, %690
+  %692 = fdiv fast float %674, %691
+  %693 = fdiv fast float %680, %691
+  %694 = fdiv fast float %686, %691
+  %695 = shl i32 %477, 16
+  %696 = ashr exact i32 %695, 16
+  %697 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 7)  ; CBufferLoadLegacy(handle,regIndex)
+  %698 = extractvalue %dx.types.CBufRet.f32 %697, 0
+  %699 = fmul fast float %698, %692
+  %700 = fmul fast float %698, %693
+  %701 = fmul fast float %698, %694
+  %702 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 1033 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xF32>
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %702, i32 %470, i32 %696, i32 undef, float %699, float %700, float %701, float 1.000000e+00, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  %703 = call %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32 59, %dx.types.Handle %6, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %704 = extractvalue %dx.types.CBufRet.i32 %703, 0
+  %705 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %706 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %705, i32 0, i32 %23, i32 %481, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %707 = extractvalue %dx.types.ResRet.f32 %706, 0
+  %708 = extractvalue %dx.types.ResRet.f32 %706, 1
+  %709 = extractvalue %dx.types.ResRet.f32 %706, 2
+  %710 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 521 })  ; AnnotateHandle(res,props)  resource: Texture2D<2xF32>
+  %711 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %710, i32 0, i32 0, i32 0, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %712 = extractvalue %dx.types.ResRet.f32 %711, 0
+  %713 = fcmp fast oeq float %712, 0.000000e+00
+  %714 = select i1 %713, float 1.000000e+00, float %712
+  %715 = fmul fast float %714, %707
+  %716 = fmul fast float %714, %708
+  %717 = fmul fast float %714, %709
+  %718 = call float @dx.op.binary.f32(i32 35, float %716, float %717)  ; FMax(a,b)
+  %719 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %715)  ; FMax(a,b)
+  %720 = call float @dx.op.binary.f32(i32 35, float %719, float %718)  ; FMax(a,b)
+  %721 = fadd fast float %720, 1.000000e+00
+  %722 = fdiv fast float %715, %721
+  %723 = fdiv fast float %716, %721
+  %724 = fdiv fast float %717, %721
+  %725 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %705, i32 0, i32 %46, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %726 = extractvalue %dx.types.ResRet.f32 %725, 0
+  %727 = extractvalue %dx.types.ResRet.f32 %725, 1
+  %728 = extractvalue %dx.types.ResRet.f32 %725, 2
+  %729 = fmul fast float %714, %726
+  %730 = fmul fast float %714, %727
+  %731 = fmul fast float %714, %728
+  %732 = call float @dx.op.binary.f32(i32 35, float %730, float %731)  ; FMax(a,b)
+  %733 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %729)  ; FMax(a,b)
+  %734 = call float @dx.op.binary.f32(i32 35, float %733, float %732)  ; FMax(a,b)
+  %735 = fadd fast float %734, 1.000000e+00
+  %736 = fdiv fast float %729, %735
+  %737 = fdiv fast float %730, %735
+  %738 = fdiv fast float %731, %735
+  %739 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %705, i32 0, i32 %23, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %740 = extractvalue %dx.types.ResRet.f32 %739, 0
+  %741 = extractvalue %dx.types.ResRet.f32 %739, 1
+  %742 = extractvalue %dx.types.ResRet.f32 %739, 2
+  %743 = fmul fast float %714, %740
+  %744 = fmul fast float %714, %741
+  %745 = fmul fast float %714, %742
+  %746 = call float @dx.op.binary.f32(i32 35, float %744, float %745)  ; FMax(a,b)
+  %747 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %743)  ; FMax(a,b)
+  %748 = call float @dx.op.binary.f32(i32 35, float %747, float %746)  ; FMax(a,b)
+  %749 = fadd fast float %748, 1.000000e+00
+  %750 = fdiv fast float %743, %749
+  %751 = fdiv fast float %744, %749
+  %752 = fdiv fast float %745, %749
+  %753 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %705, i32 0, i32 %75, i32 %480, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %754 = extractvalue %dx.types.ResRet.f32 %753, 0
+  %755 = extractvalue %dx.types.ResRet.f32 %753, 1
+  %756 = extractvalue %dx.types.ResRet.f32 %753, 2
+  %757 = fmul fast float %714, %754
+  %758 = fmul fast float %714, %755
+  %759 = fmul fast float %714, %756
+  %760 = call float @dx.op.binary.f32(i32 35, float %758, float %759)  ; FMax(a,b)
+  %761 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %757)  ; FMax(a,b)
+  %762 = call float @dx.op.binary.f32(i32 35, float %761, float %760)  ; FMax(a,b)
+  %763 = fadd fast float %762, 1.000000e+00
+  %764 = fdiv fast float %757, %763
+  %765 = fdiv fast float %758, %763
+  %766 = fdiv fast float %759, %763
+  %767 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %705, i32 0, i32 %23, i32 %544, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %768 = extractvalue %dx.types.ResRet.f32 %767, 0
+  %769 = extractvalue %dx.types.ResRet.f32 %767, 1
+  %770 = extractvalue %dx.types.ResRet.f32 %767, 2
+  %771 = fmul fast float %714, %768
+  %772 = fmul fast float %714, %769
+  %773 = fmul fast float %714, %770
+  %774 = call float @dx.op.binary.f32(i32 35, float %772, float %773)  ; FMax(a,b)
+  %775 = call float @dx.op.binary.f32(i32 35, float 0.000000e+00, float %771)  ; FMax(a,b)
+  %776 = call float @dx.op.binary.f32(i32 35, float %775, float %774)  ; FMax(a,b)
+  %777 = fadd fast float %776, 1.000000e+00
+  %778 = fdiv fast float %771, %777
+  %779 = fdiv fast float %772, %777
+  %780 = fdiv fast float %773, %777
+  %781 = fadd fast float %709, %707
+  %782 = fmul fast float %714, %781
+  %783 = fdiv fast float %782, %721
+  %784 = fmul fast float %783, 5.000000e-01
+  %785 = fadd fast float %784, %723
+  %786 = fadd fast float %728, %726
+  %787 = fmul fast float %714, %786
+  %788 = fdiv fast float %787, %735
+  %789 = fmul fast float %788, 5.000000e-01
+  %790 = fadd fast float %789, %737
+  %791 = fadd fast float %742, %740
+  %792 = fmul fast float %714, %791
+  %793 = fdiv fast float %792, %749
+  %794 = fmul fast float %793, 5.000000e-01
+  %795 = fadd fast float %794, %751
+  %796 = fadd fast float %756, %754
+  %797 = fmul fast float %714, %796
+  %798 = fdiv fast float %797, %763
+  %799 = fmul fast float %798, 5.000000e-01
+  %800 = fadd fast float %799, %765
+  %801 = fadd fast float %770, %768
+  %802 = fmul fast float %714, %801
+  %803 = fdiv fast float %802, %777
+  %804 = fmul fast float %803, 5.000000e-01
+  %805 = fadd fast float %804, %779
+  %806 = fadd fast float %790, %785
+  %807 = fadd fast float %806, %800
+  %808 = fadd fast float %807, %805
+  %809 = fmul fast float %808, 2.500000e-01
+  %810 = fsub fast float %809, %795
+  %811 = call float @dx.op.unary.f32(i32 6, float %810)  ; FAbs(value)
+  %812 = call float @dx.op.binary.f32(i32 35, float %790, float %795)  ; FMax(a,b)
+  %813 = call float @dx.op.binary.f32(i32 35, float %785, float %812)  ; FMax(a,b)
+  %814 = call float @dx.op.binary.f32(i32 35, float %800, float %805)  ; FMax(a,b)
+  %815 = call float @dx.op.binary.f32(i32 35, float %813, float %814)  ; FMax(a,b)
+  %816 = call float @dx.op.binary.f32(i32 36, float %790, float %795)  ; FMin(a,b)
+  %817 = call float @dx.op.binary.f32(i32 36, float %785, float %816)  ; FMin(a,b)
+  %818 = call float @dx.op.binary.f32(i32 36, float %800, float %805)  ; FMin(a,b)
+  %819 = call float @dx.op.binary.f32(i32 36, float %817, float %818)  ; FMin(a,b)
+  %820 = fsub fast float %815, %819
+  %821 = bitcast float %820 to i32
+  %822 = sub i32 2129764351, %821
+  %823 = bitcast i32 %822 to float
+  %824 = fmul fast float %823, %820
+  %825 = fsub fast float 2.000000e+00, %824
+  %826 = fmul fast float %823, %811
+  %827 = fmul fast float %826, %825
+  %828 = call float @dx.op.unary.f32(i32 7, float %827)  ; Saturate(value)
+  %829 = fmul fast float %828, 5.000000e-01
+  %830 = fsub fast float 1.000000e+00, %829
+  %831 = call float @dx.op.binary.f32(i32 36, float %736, float %764)  ; FMin(a,b)
+  %832 = call float @dx.op.binary.f32(i32 36, float %722, float %831)  ; FMin(a,b)
+  %833 = call float @dx.op.binary.f32(i32 36, float %832, float %778)  ; FMin(a,b)
+  %834 = call float @dx.op.binary.f32(i32 36, float %737, float %765)  ; FMin(a,b)
+  %835 = call float @dx.op.binary.f32(i32 36, float %723, float %834)  ; FMin(a,b)
+  %836 = call float @dx.op.binary.f32(i32 36, float %835, float %779)  ; FMin(a,b)
+  %837 = call float @dx.op.binary.f32(i32 36, float %738, float %766)  ; FMin(a,b)
+  %838 = call float @dx.op.binary.f32(i32 36, float %724, float %837)  ; FMin(a,b)
+  %839 = call float @dx.op.binary.f32(i32 36, float %838, float %780)  ; FMin(a,b)
+  %840 = call float @dx.op.binary.f32(i32 35, float %736, float %764)  ; FMax(a,b)
+  %841 = call float @dx.op.binary.f32(i32 35, float %722, float %840)  ; FMax(a,b)
+  %842 = call float @dx.op.binary.f32(i32 35, float %841, float %778)  ; FMax(a,b)
+  %843 = call float @dx.op.binary.f32(i32 35, float %737, float %765)  ; FMax(a,b)
+  %844 = call float @dx.op.binary.f32(i32 35, float %723, float %843)  ; FMax(a,b)
+  %845 = call float @dx.op.binary.f32(i32 35, float %844, float %779)  ; FMax(a,b)
+  %846 = call float @dx.op.binary.f32(i32 35, float %738, float %766)  ; FMax(a,b)
+  %847 = call float @dx.op.binary.f32(i32 35, float %724, float %846)  ; FMax(a,b)
+  %848 = call float @dx.op.binary.f32(i32 35, float %847, float %780)  ; FMax(a,b)
+  %849 = fdiv fast float 2.500000e-01, %842
+  %850 = fdiv fast float 2.500000e-01, %845
+  %851 = fdiv fast float 2.500000e-01, %848
+  %852 = fsub fast float 1.000000e+00, %842
+  %853 = fmul fast float %833, 4.000000e+00
+  %854 = fadd fast float %853, -4.000000e+00
+  %855 = fdiv fast float 1.000000e+00, %854
+  %856 = fmul fast float %855, %852
+  %857 = fsub fast float 1.000000e+00, %845
+  %858 = fmul fast float %836, 4.000000e+00
+  %859 = fadd fast float %858, -4.000000e+00
+  %860 = fdiv fast float 1.000000e+00, %859
+  %861 = fmul fast float %860, %857
+  %862 = fsub fast float 1.000000e+00, %848
+  %863 = fmul fast float %839, 4.000000e+00
+  %864 = fadd fast float %863, -4.000000e+00
+  %865 = fdiv fast float 1.000000e+00, %864
+  %866 = fmul fast float %865, %862
+  %867 = fmul fast float %833, %849
+  %868 = fsub fast float -0.000000e+00, %867
+  %869 = call float @dx.op.binary.f32(i32 35, float %868, float %856)  ; FMax(a,b)
+  %870 = fmul fast float %836, %850
+  %871 = fsub fast float -0.000000e+00, %870
+  %872 = call float @dx.op.binary.f32(i32 35, float %871, float %861)  ; FMax(a,b)
+  %873 = fmul fast float %839, %851
+  %874 = fsub fast float -0.000000e+00, %873
+  %875 = call float @dx.op.binary.f32(i32 35, float %874, float %866)  ; FMax(a,b)
+  %876 = call float @dx.op.binary.f32(i32 35, float %872, float %875)  ; FMax(a,b)
+  %877 = call float @dx.op.binary.f32(i32 35, float %869, float %876)  ; FMax(a,b)
+  %878 = call float @dx.op.binary.f32(i32 36, float %877, float 0.000000e+00)  ; FMin(a,b)
+  %879 = call float @dx.op.binary.f32(i32 35, float -1.875000e-01, float %878)  ; FMax(a,b)
+  %880 = bitcast i32 %704 to float
+  %881 = fmul fast float %830, %880
+  %882 = fmul fast float %881, %879
+  %883 = fmul fast float %882, 4.000000e+00
+  %884 = fadd fast float %883, 1.000000e+00
+  %885 = bitcast float %884 to i32
+  %886 = sub i32 2129764351, %885
+  %887 = bitcast i32 %886 to float
+  %888 = fmul fast float %887, %884
+  %889 = fsub fast float 2.000000e+00, %888
+  %890 = fmul fast float %889, %887
+  %891 = fadd fast float %736, %722
+  %892 = fadd fast float %891, %764
+  %893 = fadd fast float %892, %778
+  %894 = fmul fast float %882, %893
+  %895 = fadd fast float %894, %750
+  %896 = fmul fast float %890, %895
+  %897 = fadd fast float %737, %723
+  %898 = fadd fast float %897, %765
+  %899 = fadd fast float %898, %779
+  %900 = fmul fast float %882, %899
+  %901 = fadd fast float %900, %751
+  %902 = fmul fast float %890, %901
+  %903 = fadd fast float %738, %724
+  %904 = fadd fast float %903, %766
+  %905 = fadd fast float %904, %780
+  %906 = fmul fast float %882, %905
+  %907 = fadd fast float %906, %752
+  %908 = fmul fast float %890, %907
+  %909 = call float @dx.op.binary.f32(i32 35, float %902, float %908)  ; FMax(a,b)
+  %910 = call float @dx.op.binary.f32(i32 35, float %896, float %909)  ; FMax(a,b)
+  %911 = fsub fast float 1.000000e+00, %910
+  %912 = call float @dx.op.binary.f32(i32 35, float 0x3F50624DE0000000, float %911)  ; FMax(a,b)
+  %913 = fmul fast float %714, %912
+  %914 = fdiv fast float %896, %913
+  %915 = fdiv fast float %902, %913
+  %916 = fdiv fast float %908, %913
+  %917 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 7)  ; CBufferLoadLegacy(handle,regIndex)
+  %918 = extractvalue %dx.types.CBufRet.f32 %917, 0
+  %919 = fmul fast float %918, %914
+  %920 = fmul fast float %918, %915
+  %921 = fmul fast float %918, %916
+  %922 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 1033 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<4xF32>
+  call void @dx.op.textureStore.f32(i32 67, %dx.types.Handle %922, i32 %242, i32 %696, i32 undef, float %919, float %920, float %921, float 1.000000e+00, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  ret void
+}
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.threadIdInGroup.i32(i32, i32) #0
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.groupId.i32(i32, i32) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.unary.f32(i32, float) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.binary.f32(i32, float, float) #0
+
+; Function Attrs: nounwind
+declare void @dx.op.textureStore.f32(i32, %dx.types.Handle, i32, i32, i32, float, float, float, float, i8) #1
+
+; Function Attrs: nounwind readonly
+declare %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32) #2
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32, %dx.types.Handle, i32) #2
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.i32 @dx.op.cbufferLoadLegacy.i32(i32, %dx.types.Handle, i32) #2
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.annotateHandle(i32, %dx.types.Handle, %dx.types.ResourceProperties) #0
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.createHandleFromBinding(i32, %dx.types.ResBind, i32, i1) #0
+
+attributes #0 = { nounwind readnone }
+attributes #1 = { nounwind }
+attributes #2 = { nounwind readonly }
+
+!llvm.ident = !{!0}
+!dx.version = !{!1}
+!dx.valver = !{!2}
+!dx.shaderModel = !{!3}
+!dx.resources = !{!4}
+!dx.entryPoints = !{!14}
+
+!0 = !{!"clang version 3.7 (tags/RELEASE_370/final)"}
+!1 = !{i32 1, i32 6}
+!2 = !{i32 1, i32 7}
+!3 = !{!"cs", i32 6, i32 6}
+!4 = !{!5, !9, !11, null}
+!5 = !{!6, !8}
+!6 = !{i32 0, %"class.Texture2D<vector<float, 2> >"* undef, !"", i32 0, i32 0, i32 1, i32 2, i32 0, !7}
+!7 = !{i32 0, i32 9}
+!8 = !{i32 1, %"class.Texture2D<vector<float, 4> >"* undef, !"", i32 0, i32 1, i32 1, i32 2, i32 0, !7}
+!9 = !{!10}
+!10 = !{i32 0, %"class.RWTexture2D<vector<float, 4> >"* undef, !"", i32 0, i32 0, i32 1, i32 2, i1 false, i1 false, i1 false, !7}
+!11 = !{!12, !13}
+!12 = !{i32 0, %cbFSR2* undef, !"", i32 0, i32 0, i32 1, i32 144, null}
+!13 = !{i32 1, %cbRCAS* undef, !"", i32 0, i32 1, i32 1, i32 16, null}
+!14 = !{void ()* @CS, !"CS", null, !4, !15}
+!15 = !{i32 0, i64 8388864, i32 4, !16, i32 5, !17}
+!16 = !{i32 64, i32 1, i32 1}
+!17 = !{i32 0}
