@@ -1,6 +1,6 @@
 ﻿// RE4DLSS: a ReShade add-on for Resident Evil 4 remake (RE Engine, DirectX 12) that will replace
 // its FSR 2 with DLSS (upscaler.cpp). This file: logging, shader ids, resource tracking,
-// the overlay, and the frame capture tool used to find TAA (docs/FINDINGS.md).
+// the overlay, and the frame capture tool used to find FSR 2's passes (docs/FINDINGS.md).
 //
 // Frame capture: F10 records two frames of GPU work to RE4DLSS-frame-N.txt next to re8.exe:
 //   - every compute dispatch, and every full-screen draw (3 or 4 vertices / 6 indices, one
@@ -903,7 +903,7 @@ void StartCapture() {
 }
 
 bool g_keyWasDown = false;
-bool g_captureHotkey = true;  // F10 (probe builds); ReShade.ini [RE4DLSS] CaptureHotkey
+bool g_captureHotkey = false;  // F10, off unless ReShade.ini [RE4DLSS] CaptureHotkey=1
 
 void OnPresent(command_queue*, swapchain* sc, const rect*, const rect*, uint32_t, const rect*) {
     if (g_capture.load() == Capture::Recording) {

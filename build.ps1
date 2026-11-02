@@ -1,8 +1,11 @@
 # Builds bin\RE4DLSS.addon64 with MSVC (Visual Studio 2022+ with C++ tools).
-# Usage: .\build.ps1 [-Install] [-GameDir <folder of re4.exe>]
-#   -Install  copies the add-on next to re4.exe (game closed).
+# Usage: .\build.ps1 [-Install] [-Package] [-GameDir <folder of re4.exe>]
+#   -Install  copies the add-on and nvngx_dlss.dll next to re4.exe (game closed).
+#   -Package  makes bin\release\RE4DLSS-<version>.zip for Fluffy Mod Manager: one folder,
+#             RE4DLSS, with modinfo.ini and the files laid out as they go in the game folder.
 param(
     [switch]$Install,
+    [switch]$Package,
     [string]$GameDir = "E:\SteamLibrary\steamapps\common\RESIDENT EVIL 4  BIOHAZARD RE4"
 )
 $ErrorActionPreference = 'Stop'
@@ -40,4 +43,48 @@ if ($Install) {
     if (-not (Test-Path $ngx)) { throw "nvngx_dlss.dll not found in third_party\bin" }
     Copy-Item $ngx $GameDir -Force
     Write-Host "Installed to $GameDir"
+}
+
+if ($Package) {
+    $version = [regex]::Match((Get-Content "$root\src\version.h" -Raw), 'RD_VERSION "([^"]+)"').Groups[1].Value
+    $ngx = "$root\third_party\bin\nvngx_dlss.dll"
+    if (-not (Test-Path $ngx)) { throw "nvngx_dlss.dll not found in third_party\bin" }
+    $stage = "$root\bin\release\RE4DLSS-$version"
+    $mod = "$stage\RE4DLSS"
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force "$mod\RE4DLSS-licenses" | Out-Null
+
+    # Files installed into the game folder (where re4.exe is).
+    Copy-Item $addon, $ngx $mod
+    Copy-Item "$root\README.md" "$mod\RE4DLSS-README.md"
+    Copy-Item "$root\THIRD_PARTY_NOTICES.txt" "$mod\RE4DLSS-THIRD_PARTY_NOTICES.txt"
+    Copy-Item "$root\LICENSE" "$mod\RE4DLSS-licenses\RE4DLSS-LICENSE.txt"
+    Copy-Item "$root\third_party\dlss\LICENSE.txt" "$mod\RE4DLSS-licenses\NVIDIA-DLSS-LICENSE.txt"
+    Copy-Item "$root\third_party\reshade\LICENSE.md" "$mod\RE4DLSS-licenses\ReShade-LICENSE.md"
+
+    # Fluffy Mod Manager's mod information (key=value, one per line).
+    @(
+        "name=RE4DLSS - DLSS for Resident Evil 4",
+        "version=v$version",
+        "description=Puts NVIDIA DLSS in place of the game's FSR 2 upscaler: turn FSR 2 on in the game and its quality setting picks the render size, DLSS does the upscaling, and the game's sharpness setting still applies. Needs an NVIDIA RTX card and ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches DLSS on and off.",
+        "author=Scott Dinwiddie"
+    ) | Set-Content "$mod\modinfo.ini" -Encoding ascii
+
+    # Zip with forward-slash entry names (Compress-Archive in PowerShell 5.1 writes backslashes,
+    # which some tools mishandle).
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $zip = "$root\bin\release\RE4DLSS-$version.zip"
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        Get-ChildItem $stage -Recurse -File | ForEach-Object {
+            $entry = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry,
+                [IO.Compression.CompressionLevel]::Optimal)
+        }
+    } finally { $archive.Dispose() }
+    Write-Host "Packaged $zip"
+    Get-ChildItem $stage -Recurse -File | ForEach-Object {
+        "{0,-60} {1,12:N0}" -f $_.FullName.Substring($stage.Length + 1), $_.Length
+    }
 }
