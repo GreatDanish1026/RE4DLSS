@@ -1,0 +1,40 @@
+# Builds bin\RE4DLSS.addon64 with MSVC (Visual Studio 2022+ with C++ tools).
+# Usage: .\build.ps1 [-Install] [-GameDir <folder of re4.exe>]
+#   -Install  copies the add-on next to re4.exe (game closed).
+param(
+    [switch]$Install,
+    [string]$GameDir = "E:\SteamLibrary\steamapps\common\RESIDENT EVIL 4  BIOHAZARD RE4"
+)
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$env:PATH = "$(Split-Path $vswhere);$env:PATH"  # vcvars64.bat runs vswhere by name
+$vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (-not $vs) { throw "Visual Studio with the C++ x64 tools not found." }
+$vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+
+$obj = "$root\bin\obj"
+New-Item -ItemType Directory -Force $obj | Out-Null
+$addon = "$root\bin\RE4DLSS.addon64"
+
+# ReShade add-on headers in third_party\reshade match ReShade 6.8.0. 0.0.x: capture probe only
+# (dlss.cpp and blit.hlsl, from VillageDLSS, aren't built yet).
+$cmd = @(
+    "call `"$vcvars`" >nul",
+    ("cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX " +
+     "/I `"$obj`" /I `"$root\third_party\imgui`" /I `"$root\third_party\reshade\include`" " +
+     "/Fo`"$obj\\`" `"$root\src\main.cpp`" `"$root\src\upscaler.cpp`" `"$root\third_party\reshade\utils\descriptor_tracking.cpp`" " +
+     "user32.lib advapi32.lib ole32.lib " +
+     "/link /DLL /OUT:`"$addon`" /PDB:`"$obj\RE4DLSS.pdb`" /DEBUG")
+) -join " && "
+cmd /c $cmd
+if ($LASTEXITCODE) { throw "build failed" }
+Write-Host "Built $addon"
+
+if ($Install) {
+    if (-not (Test-Path "$GameDir\re4.exe")) { throw "re4.exe not found in $GameDir (pass -GameDir)" }
+    if (Get-Process re4 -ErrorAction SilentlyContinue) { throw "Close the game first." }
+    Copy-Item $addon $GameDir -Force
+    Write-Host "Installed to $GameDir"
+}
