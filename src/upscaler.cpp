@@ -191,7 +191,10 @@ void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
     const bool match = f[kScreenSizeFloat] == static_cast<float>(w) && f[kScreenSizeFloat + 1] == static_cast<float>(h) &&
                        std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f &&
                        std::fabs(f[0]) + std::fabs(f[5]) > 1e-3f && std::fabs(axis(0) - 1) < 1e-2f &&
-                       std::fabs(axis(1) - 1) < 1e-2f && f[98] > 0;
+                       std::fabs(axis(1) - 1) < 1e-2f && f[98] > 0 &&
+                       // projection x scale (view x axis . viewProj column 0) positive: not the mirrored
+                       // second view the game also draws at this size
+                       f[28] * f[0] + f[32] * f[4] + f[36] * f[8] > 0.05f;
     if (match) {
         memcpy(s.scene, f, kSceneInfoBytes);
         s.sceneValid = true;
