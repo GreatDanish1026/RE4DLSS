@@ -14,6 +14,10 @@
 // FSR 3.1/4 (AMD's FidelityFX runtime) takes the same inputs plus FSR 2's reactive mask
 // (cs1e379886 u0) and the camera from cbFSR2.
 //
+// Frame generation (framegen.cpp) gets the same depth and motion vectors at that pass, whoever
+// upscales, and the camera from RE Engine's SceneInfo constant buffer: the root constant buffer
+// whose screenSize (byte 368) is the render size, seen in the frame before FSR 2 runs.
+//
 // NGX records its own compute state and descriptor heaps on the game's command list, so the
 // game's bindings are tracked per command list and put back afterwards (as in VillageDLSS).
 
@@ -139,7 +143,21 @@ struct __declspec(uuid("4c2a9e17-6b3d-4f81-a5c0-9d2e7b1f3a64")) ListState {
     pipeline_stage pipeStages = pipeline_stage::all;
     StageState compute, graphics;
     Chain chain;
+    // Frame generation: the last SceneInfo of the render size bound on this list.
+    float scene[kSceneInfoBytes / 4];
+    bool sceneValid = false;
+    buffer_range checked[8] = {};  // constant buffers looked at on this list (most are bound many times)
+    uint32_t checkedNext = 0;
 };
+
+// SceneInfo search: the render size it must have (from the last cbFSR2), and the last one found on
+// any list (when the scene is drawn on another list than FSR 2's passes).
+std::atomic<uint32_t> g_sceneW{0}, g_sceneH{0};
+std::mutex g_sceneMutex;
+float g_lastScene[kSceneInfoBytes / 4];
+bool g_lastSceneValid = false;
+uint64_t g_scenesFound = 0;
+constexpr uint32_t kScreenSizeFloat = 92;  // byte 368
 
 ListState* State(command_list* cl) { return cl->get_private_data<ListState>(); }
 
@@ -150,6 +168,36 @@ StageState* Stage(ListState* s, shader_stage stages) {
 }
 
 void OnInitList(command_list* cl) { cl->create_private_data<ListState>(); }
+
+// Is this constant buffer SceneInfo (screenSize = the render size, 1 / screenSize after it)? Keeps
+// a copy on the list if so. Each buffer range is looked at once per list.
+void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
+    const uint32_t w = g_sceneW.load(), h = g_sceneH.load();
+    if (!w || !r.buffer.handle) return;
+    for (const buffer_range& c : s.checked)
+        if (c.buffer.handle == r.buffer.handle && c.offset == r.offset) return;
+    s.checked[s.checkedNext++ % 8] = r;
+    device* dev = cl->get_device();
+    const resource_desc d = dev->get_resource_desc(r.buffer);
+    // SceneInfo is written by the CPU every frame (upload memory); GPU-only buffers can't be read.
+    if (d.type != resource_type::buffer || d.heap == memory_heap::default_ || r.offset + kSceneInfoBytes > d.buffer.size)
+        return;
+    void* data = nullptr;
+    if (!dev->map_buffer_region(r.buffer, r.offset, kSceneInfoBytes, map_access::read_only, &data) || !data) return;
+    const float* f = static_cast<const float*>(data);
+    const bool match = f[kScreenSizeFloat] == static_cast<float>(w) && f[kScreenSizeFloat + 1] == static_cast<float>(h) &&
+                       std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f;
+    if (match) {
+        memcpy(s.scene, f, kSceneInfoBytes);
+        s.sceneValid = true;
+    }
+    dev->unmap_buffer_region(r.buffer);
+    if (!match) return;
+    std::lock_guard<std::mutex> lock(g_sceneMutex);
+    memcpy(g_lastScene, s.scene, kSceneInfoBytes);
+    g_lastSceneValid = true;
+    if (++g_scenesFound == 1) Log("frame generation: SceneInfo found (%ux%u, buffer heap %d)", w, h, static_cast<int>(d.heap));
+}
 void OnDestroyList(command_list* cl) { cl->destroy_private_data<ListState>(); }
 
 void OnResetList(command_list* cl) {
@@ -185,6 +233,8 @@ void OnPushDescriptors(command_list* cl, shader_stage stages, pipeline_layout la
     if (u.type == descriptor_type::constant_buffer || u.type == descriptor_type::buffer_shader_resource_view ||
         u.type == descriptor_type::buffer_unordered_access_view)
         st->roots[param] = {stages, u.type, *static_cast<const buffer_range*>(u.descriptors)};
+    if (u.type == descriptor_type::constant_buffer && FrameGenWantsCamera())
+        CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
 }
 
 void OnPushConstants(command_list* cl, shader_stage stages, pipeline_layout layout, uint32_t param, uint32_t first,
@@ -408,9 +458,52 @@ void OnDestroyDevice(device*) {
     fsr::Shutdown();
 }
 
+// Frame generation's inputs for this frame: the camera (this list's SceneInfo, else the last one
+// seen), the game's converted depth and motion vectors (shader resource state, as FSR 2 left them),
+// FSR 2's render size, jitter and reset.
+void GiveFrameGen(command_list* cl, ListState& s) {
+    if (!FrameGenWantsCamera() || !s.chain.depth.handle || !s.chain.motion.handle) return;
+    device* dev = cl->get_device();
+    uint32_t cb[kCbWords];
+    if (!ReadFsrConstants(dev, s.compute, cb)) return;
+    float f[kCbWords];
+    memcpy(f, cb, sizeof(f));
+    const uint32_t rw = cb[kRenderSize], rh = cb[kRenderSize + 1];
+    g_sceneW = rw, g_sceneH = rh;  // what SceneInfo must say from now on
+    if (s.sceneValid) {
+        FrameGenSetSceneInfo(s.scene);
+    } else {
+        std::lock_guard<std::mutex> lock(g_sceneMutex);
+        if (g_lastSceneValid && g_lastScene[kScreenSizeFloat] == static_cast<float>(rw) &&
+            g_lastScene[kScreenSizeFloat + 1] == static_cast<float>(rh))
+            FrameGenSetSceneInfo(g_lastScene);
+    }
+    static uint32_t lastFrameIndex = 0;
+    const bool reset = cb[kFrameIndex] == 0 || cb[kFrameIndex] < lastFrameIndex;
+    lastFrameIndex = cb[kFrameIndex];
+    constexpr unsigned kShaderResource = 0x40 | 0x80;  // D3D12 non-pixel + pixel shader resource
+    FrameGenTag(reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()),
+                reinterpret_cast<ID3D12Resource*>(s.chain.depth.handle), reinterpret_cast<ID3D12Resource*>(s.chain.motion.handle),
+                kShaderResource, rw, rh, f[kJitter], f[kJitter + 1], reset);
+}
+
 bool g_keyWasDown = false;
 
 }  // namespace
+
+const ImVec4 kWarn(1, 0.6f, 0.3f, 1);
+
+float ControlWidth() { return ImGui::GetFontSize() * 14.0f; }
+
+void Help(const char* text) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", text);
+}
+
+void RestoreListState(command_list* cl) {
+    if (ListState* s = State(cl)) Restore(cl, *s);
+}
 
 bool UpscalerOnDraw(command_list*, uint32_t, uint32_t) { return false; }
 
@@ -427,6 +520,7 @@ bool UpscalerOnDispatch(command_list* cl) {
         case kDepthCs: s->chain.depth = ComputeView(cl->get_device(), s->compute, 0, true); return false;
         case kLumaCs: s->chain.color = ComputeView(cl->get_device(), s->compute, 0, false); return false;
         case kAccumulateCs: {
+            GiveFrameGen(cl, *s);
             const bool replaced = g_set.enabled && OnAccumulate(cl, *s);
             s->chain = Chain();  // each frame gathers its own inputs
             return replaced;
@@ -501,7 +595,17 @@ void UpscalerOverlay() {
                            "Now running: nothing to replace (the game isn't running FSR 2: turn it on, or leave the menu)");
     ImGui::TextDisabled("DLSS: %s", dlss::Status().c_str());
     ImGui::TextDisabled("FSR: %s", fsr::Status().c_str());
-    if (g_set.enabled && !err.empty()) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", err.c_str());
+    if (g_set.enabled && !err.empty()) ImGui::TextColored(kWarn, "%s", err.c_str());
+
+    DrawFrameGenSettings();
+    bool warn = false;
+    const std::string fg = FrameGenHeadline(&warn);
+    if (warn) ImGui::TextColored(kWarn, "%s", fg.c_str());
+    else ImGui::Text("%s", fg.c_str());
+    if (ImGui::TreeNode("Frame generation details")) {
+        DrawFrameGenStatus();
+        ImGui::TreePop();
+    }
 }
 
 void UpscalerInit() {
@@ -514,6 +618,7 @@ void UpscalerInit() {
     reshade::register_event<reshade::addon_event::push_descriptors>(&OnPushDescriptors);
     reshade::register_event<reshade::addon_event::push_constants>(&OnPushConstants);
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
+    RegisterFrameGen();
     Log("Upscaling %s at start (F9 toggles), upscaler setting %d (0 auto, 1 DLSS, 2 FSR)", g_set.enabled ? "on" : "off",
         g_set.upscaler);
 }
@@ -527,6 +632,7 @@ void UpscalerShutdown() {
     reshade::unregister_event<reshade::addon_event::push_descriptors>(&OnPushDescriptors);
     reshade::unregister_event<reshade::addon_event::push_constants>(&OnPushConstants);
     reshade::unregister_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
+    UnregisterFrameGen();
 }
 
 }  // namespace rd
