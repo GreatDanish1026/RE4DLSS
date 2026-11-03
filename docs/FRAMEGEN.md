@@ -11,7 +11,7 @@ forked from StrayDLSS 1.0.0 (Unreal Engine 4.27); what changed for RE Engine:
 | Motion | our motion.hlsl, render pixels | the game's rg16f UV offsets (cs5469503e u0), state srv; DLSS-G mvecScale 1, FSR FG scale = render size |
 | Camera | View uniform buffer | RE Engine SceneInfo, found by content (below) |
 | Units | cm | m (FSR FG viewSpaceToMetersFactor 1) |
-| Pre-HUD picture | UE's HDR back buffer copy | none yet (`kHudFromBackBufferCopy = false`): the HUD may wobble |
+| Pre-HUD picture | UE's HDR back buffer copy | final pass ps9d1f6421 repeated after the game's, with the scene (ps792d66db's #85ef6, copied into the HUD texture #fd900 again), into our back-buffer-format target |
 | Streamline engine | eUnreal | eCustom "RE Engine", own project id |
 | Tagging | at submission (`kTagAtRecord` false) | same; the first 120 "trace:" log lines show recorded/submitted/present order |
 
