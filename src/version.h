@@ -3,4 +3,4 @@
 
 #define RD_PRODUCT "RE4DLSS"  // add-on name, log file name, ReShade.ini section
 #define RD_GAME "Resident Evil 4"
-#define RD_VERSION "1.0.0"
+#define RD_VERSION "1.1.0"

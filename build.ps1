@@ -1,8 +1,11 @@
 # Builds bin\RE4DLSS.addon64 with MSVC (Visual Studio 2022+ with C++ tools).
 # Usage: .\build.ps1 [-Install] [-Package] [-GameDir <folder of re4.exe>]
-#   -Install  copies the add-on and nvngx_dlss.dll next to re4.exe (game closed).
+#   -Install  copies the add-on, nvngx_dlss.dll and AMD's FSR runtime next to re4.exe (game closed).
 #   -Package  makes bin\release\RE4DLSS-<version>.zip for Fluffy Mod Manager: one folder,
 #             RE4DLSS, with modinfo.ini and the files laid out as they go in the game folder.
+# AMD's FSR runtime (amd_fidelityfx_loader_dx12.dll, amd_fidelityfx_upscaler_dx12.dll) comes from
+# Kits\FidelityFX\signedbin of AMD's FSR SDK 2.4.0
+# (github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases), copied to third_party\fidelityfx\bin.
 param(
     [switch]$Install,
     [switch]$Package,
@@ -26,13 +29,21 @@ $cmd = @(
     "call `"$vcvars`" >nul",
     ("cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX " +
      "/I `"$obj`" /I `"$root\third_party\imgui`" /I `"$root\third_party\reshade\include`" /I `"$root\third_party\dlss\include`" " +
-     "/Fo`"$obj\\`" `"$root\src\main.cpp`" `"$root\src\upscaler.cpp`" `"$root\src\dlss.cpp`" `"$root\third_party\reshade\utils\descriptor_tracking.cpp`" " +
+     "/I `"$root\third_party\fidelityfx\api\include`" /I `"$root\third_party\fidelityfx\upscalers\include`" " +
+     "/Fo`"$obj\\`" `"$root\src\main.cpp`" `"$root\src\upscaler.cpp`" `"$root\src\dlss.cpp`" `"$root\src\fsr.cpp`" `"$root\third_party\reshade\utils\descriptor_tracking.cpp`" " +
      "user32.lib advapi32.lib ole32.lib d3d12.lib `"$root\third_party\dlss\lib\nvsdk_ngx_s.lib`" " +
      "/link /DLL /OUT:`"$addon`" /PDB:`"$obj\RE4DLSS.pdb`" /DEBUG")
 ) -join " && "
 cmd /c $cmd
 if ($LASTEXITCODE) { throw "build failed" }
 Write-Host "Built $addon"
+
+# AMD's FSR runtime, signed, next to the exe.
+$ffx = "$root\third_party\fidelityfx\bin"
+$ffxFiles = "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll"
+foreach ($f in $ffxFiles) {
+    if (($Install -or $Package) -and -not (Test-Path "$ffx\$f")) { throw "$f not found in $ffx (copy Kits\FidelityFX\signedbin from AMD's FSR SDK 2.4.0)" }
+}
 
 if ($Install) {
     if (-not (Test-Path "$GameDir\re4.exe")) { throw "re4.exe not found in $GameDir (pass -GameDir)" }
@@ -42,6 +53,7 @@ if ($Install) {
     $ngx = "$root\third_party\bin\nvngx_dlss.dll"
     if (-not (Test-Path $ngx)) { throw "nvngx_dlss.dll not found in third_party\bin" }
     Copy-Item $ngx $GameDir -Force
+    foreach ($f in $ffxFiles) { Copy-Item "$ffx\$f" $GameDir -Force }
     Write-Host "Installed to $GameDir"
 }
 
@@ -56,17 +68,19 @@ if ($Package) {
 
     # Files installed into the game folder (where re4.exe is).
     Copy-Item $addon, $ngx $mod
+    foreach ($f in $ffxFiles) { Copy-Item "$ffx\$f" $mod }
     Copy-Item "$root\README.md" "$mod\RE4DLSS-README.md"
     Copy-Item "$root\THIRD_PARTY_NOTICES.txt" "$mod\RE4DLSS-THIRD_PARTY_NOTICES.txt"
     Copy-Item "$root\LICENSE" "$mod\RE4DLSS-licenses\RE4DLSS-LICENSE.txt"
     Copy-Item "$root\third_party\dlss\LICENSE.txt" "$mod\RE4DLSS-licenses\NVIDIA-DLSS-LICENSE.txt"
     Copy-Item "$root\third_party\reshade\LICENSE.md" "$mod\RE4DLSS-licenses\ReShade-LICENSE.md"
+    Copy-Item "$root\third_party\fidelityfx\license.md" "$mod\RE4DLSS-licenses\AMD-FSR-LICENSE.txt"
 
     # Fluffy Mod Manager's mod information (key=value, one per line).
     @(
-        "name=RE4DLSS - DLSS for Resident Evil 4",
+        "name=RE4DLSS - DLSS and FSR 3/4 for Resident Evil 4",
         "version=v$version",
-        "description=Puts NVIDIA DLSS in place of the game's FSR 2 upscaler: turn FSR 2 on in the game and its quality setting picks the render size, DLSS does the upscaling, and the game's sharpness setting still applies. Needs an NVIDIA RTX card and ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches DLSS on and off.",
+        "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. DLSS needs an NVIDIA RTX card; FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
         "author=Scott Dinwiddie"
     ) | Set-Content "$mod\modinfo.ini" -Encoding ascii
 

@@ -1,4 +1,5 @@
-// DLSS in place of FSR 2's accumulate pass in Resident Evil 4 (docs/FINDINGS.md).
+// DLSS, or AMD FSR 3.1 / FSR 4, in place of FSR 2's accumulate pass in Resident Evil 4
+// (docs/FINDINGS.md, docs/FSR.md).
 //
 // The game runs AMD FSR 2.1 as compute passes. Before FSR proper it converts its own inputs:
 //   CS_UpscalingDepthTranslation (csd2efdab0): depth -> r32f copy (u0), reverse-Z;
@@ -10,6 +11,8 @@
 // inputs taken from the passes above in the same command list, and FSR's cbFSR2 (root CBV b0)
 // gives the sizes, the jitter (fJitter, render pixels) and the frame index (0 after a reset).
 // RCAS still runs, with the game's sharpness setting. The render size is the game's FSR 2 quality.
+// FSR 3.1/4 (AMD's FidelityFX runtime) takes the same inputs plus FSR 2's reactive mask
+// (cs1e379886 u0) and the camera from cbFSR2.
 //
 // NGX records its own compute state and descriptor heaps on the game's command list, so the
 // game's bindings are tracked per command list and put back afterwards (as in VillageDLSS).
@@ -21,6 +24,7 @@
 
 #include "common.hpp"
 
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -29,6 +33,7 @@
 
 #include "../third_party/reshade/utils/descriptor_tracking.hpp"
 #include "dlss.hpp"
+#include "fsr.hpp"
 #include "version.h"
 
 using namespace reshade::api;
@@ -36,6 +41,7 @@ using namespace reshade::api;
 namespace rd {
 namespace {
 
+constexpr uint32_t kReactiveCs = 0x1e379886;    // FSR 2 reactive mask (u0 r8), before the others
 constexpr uint32_t kDepthCs = 0xd2efdab0;       // CS_UpscalingDepthTranslation
 constexpr uint32_t kVelocityCs = 0x5469503e;    // CS_UpscalingVelocityTranslate
 constexpr uint32_t kLumaCs = 0xaa8d773e;        // FSR 2 luminance pyramid (t0 = render-size colour)
@@ -47,13 +53,19 @@ constexpr int kRenderSize = 0;    // int2
 constexpr int kDisplaySize = 2;   // int2
 constexpr int kFrameIndex = 7;    // uint
 constexpr int kJitter = 10;       // float2, render pixels
+constexpr int kDeviceToViewDepth = 16;  // float4 (FSR 2's depth -> view depth from near/far)
 constexpr int kPreExposure = 28;  // float
+constexpr int kTanHalfFov = 29;   // float
 constexpr int kCbWords = 36;      // 144 bytes
 
 // ---------------------------------------------------------------- settings
 
+enum class Tech { Auto = 0, Dlss = 1, Fsr = 2 };
+
 struct Settings {
     bool enabled = true;  // F9; remembered across launches
+    int upscaler = 0;     // Tech: Auto = DLSS where NGX runs (RTX), else FSR
+    bool fsrReactive = true;  // give FSR 3/4 the game's FSR 2 reactive mask
     int preset = 11;      // NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer); 0 = DLSS default
     bool flipJitterX = false, flipJitterY = false;  // testing: jitter sign
 } g_set;
@@ -61,6 +73,8 @@ struct Settings {
 void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "Enabled", g_set.enabled);
     reshade::get_config_value(nullptr, RD_PRODUCT, "Preset", g_set.preset);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
 }
@@ -68,17 +82,20 @@ void LoadSettings() {
 void SaveSettings() {
     reshade::set_config_value(nullptr, RD_PRODUCT, "Enabled", g_set.enabled);
     reshade::set_config_value(nullptr, RD_PRODUCT, "Preset", g_set.preset);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
 }
 
 std::mutex g_statusMutex;
 std::string g_lastError, g_lastLogged, g_mode;
+Tech g_active = Tech::Auto;  // the backend that ran last
 uint64_t g_replaced = 0;
 
 void Fail(const std::string& why) {
     std::lock_guard<std::mutex> lock(g_statusMutex);
-    if (why != g_lastLogged) Log("DLSS: %s", why.c_str());
+    if (why != g_lastLogged) Log("Upscaler: %s", why.c_str());
     g_lastLogged = why;
     g_lastError = why;
 }
@@ -111,7 +128,7 @@ struct StageState {
 
 // FSR's inputs, gathered from the passes before accumulate in the same command list.
 struct Chain {
-    resource depth = {0}, motion = {0}, color = {0};
+    resource depth = {0}, motion = {0}, color = {0}, reactive = {0};
 };
 
 struct __declspec(uuid("4c2a9e17-6b3d-4f81-a5c0-9d2e7b1f3a64")) ListState {
@@ -280,31 +297,90 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         return false;
     }
 
+    // Which upscaler: Auto takes DLSS when NGX starts (RTX cards), FSR 3/4 otherwise.
+    ID3D12Device* d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
     std::string err;
-    if (!dlss::Init(reinterpret_cast<ID3D12Device*>(dev->get_native()), err)) {
+    Tech tech = static_cast<Tech>(g_set.upscaler);
+    if (tech == Tech::Auto) {
+        std::string dlssErr;
+        tech = dlss::Init(d3d, dlssErr) ? Tech::Dlss : Tech::Fsr;
+    }
+    if (tech == Tech::Dlss ? !dlss::Init(d3d, err) : !fsr::Init(d3d, err)) {
         Fail(err);
         return false;
     }
-    static uint32_t lastFrameIndex = 0;
-    dlss::Inputs in;
-    in.color = reinterpret_cast<ID3D12Resource*>(c.color.handle);
-    in.depth = reinterpret_cast<ID3D12Resource*>(c.depth.handle);
-    in.motion = reinterpret_cast<ID3D12Resource*>(c.motion.handle);
-    in.output = reinterpret_cast<ID3D12Resource*>(output.handle);
-    in.renderWidth = renderW, in.renderHeight = renderH;
-    in.outputWidth = outW, in.outputHeight = outH;
-    // FSR 2 and DLSS use the same jitter convention (render pixels).
-    in.jitterX = f[kJitter] * (g_set.flipJitterX ? -1 : 1);
-    in.jitterY = f[kJitter + 1] * (g_set.flipJitterY ? -1 : 1);
-    in.motionScaleX = static_cast<float>(renderW);  // UV offsets -> render pixels
-    in.motionScaleY = static_cast<float>(renderH);
-    in.preExposure = f[kPreExposure] > 0 ? f[kPreExposure] : 1;
-    in.reset = cb[kFrameIndex] == 0 || cb[kFrameIndex] < lastFrameIndex;  // FSR 2 restarts its count on a reset
-    lastFrameIndex = cb[kFrameIndex];
-    in.preset = g_set.preset;
-    in.key = reinterpret_cast<const void*>(1);  // one history: FSR alternates its accumulate output
+    if (tech != g_active) {  // free the other upscaler's history textures
+        if (g_active == Tech::Dlss) dlss::ReleaseFeatures();
+        if (g_active == Tech::Fsr) fsr::ReleaseContexts();
+        Log("Upscaler: %s", tech == Tech::Dlss ? "DLSS" : "FSR 3/4");
+        g_active = tech;
+    }
 
-    if (!dlss::Evaluate(reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()), in, err)) {
+    static uint32_t lastFrameIndex = 0;
+    // FSR 2 restarts its frame count on a history reset (camera cut, menu).
+    const bool reset = cb[kFrameIndex] == 0 || cb[kFrameIndex] < lastFrameIndex;
+    lastFrameIndex = cb[kFrameIndex];
+    // FSR 2, DLSS and FSR 3 share the jitter convention (render pixels).
+    const float jitterX = f[kJitter] * (g_set.flipJitterX ? -1 : 1);
+    const float jitterY = f[kJitter + 1] * (g_set.flipJitterY ? -1 : 1);
+    const float preExposure = f[kPreExposure] > 0 ? f[kPreExposure] : 1;
+    auto* list = reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native());
+    char extra[160] = "";
+
+    bool ok;
+    if (tech == Tech::Dlss) {
+        dlss::Inputs in;
+        in.color = reinterpret_cast<ID3D12Resource*>(c.color.handle);
+        in.depth = reinterpret_cast<ID3D12Resource*>(c.depth.handle);
+        in.motion = reinterpret_cast<ID3D12Resource*>(c.motion.handle);
+        in.output = reinterpret_cast<ID3D12Resource*>(output.handle);
+        in.renderWidth = renderW, in.renderHeight = renderH;
+        in.outputWidth = outW, in.outputHeight = outH;
+        in.jitterX = jitterX, in.jitterY = jitterY;
+        in.motionScaleX = static_cast<float>(renderW);  // UV offsets -> render pixels
+        in.motionScaleY = static_cast<float>(renderH);
+        in.preExposure = preExposure;
+        in.reset = reset;
+        in.preset = g_set.preset;
+        in.key = reinterpret_cast<const void*>(1);  // one history: FSR alternates its accumulate output
+        ok = dlss::Evaluate(list, in, err);
+    } else {
+        // FSR 2's depth -> view depth parameters (reversed Z): infinite far plane: (~0, near);
+        // finite: (-q, q * far) with q = near / (far - near).
+        const float dv0 = f[kDeviceToViewDepth], dv1 = f[kDeviceToViewDepth + 1];
+        float nearZ = 0.01f, farZ = 0;
+        if (std::fabs(dv0) < 1e-4f) {
+            nearZ = dv1;
+        } else if (dv0 < 0) {
+            farZ = dv1 / -dv0;
+            nearZ = dv1 / (1 - dv0);
+        }
+        if (!(nearZ > 1e-5f && nearZ < 100) || (farZ != 0 && !(farZ > nearZ))) nearZ = 0.01f, farZ = 0;
+        const float tanHalf = f[kTanHalfFov];
+        const float fovY = tanHalf > 0.01f && tanHalf < 20 ? 2 * std::atan(tanHalf) : 1.0f;
+
+        fsr::Inputs in;
+        in.color = reinterpret_cast<ID3D12Resource*>(c.color.handle);
+        in.depth = reinterpret_cast<ID3D12Resource*>(c.depth.handle);
+        in.motion = reinterpret_cast<ID3D12Resource*>(c.motion.handle);
+        in.reactive = g_set.fsrReactive ? reinterpret_cast<ID3D12Resource*>(c.reactive.handle) : nullptr;
+        in.output = reinterpret_cast<ID3D12Resource*>(output.handle);
+        in.renderWidth = renderW, in.renderHeight = renderH;
+        in.outputWidth = outW, in.outputHeight = outH;
+        in.jitterX = jitterX, in.jitterY = jitterY;
+        in.motionScaleX = static_cast<float>(renderW);
+        in.motionScaleY = static_cast<float>(renderH);
+        in.preExposure = preExposure;
+        in.cameraNear = nearZ, in.cameraFar = farZ, in.cameraFovY = fovY;
+        in.metersPerUnit = 1.0f;  // RE Engine: metres
+        in.sharpness = 0;         // the game's RCAS sharpens afterwards
+        in.reset = reset;
+        ok = fsr::Evaluate(list, in, err);
+        snprintf(extra, sizeof(extra), ", near %.4f, far %s, FOV %.1f deg, reactive mask %s", nearZ,
+                 farZ > 0 ? std::to_string(farZ).c_str() : "infinite", fovY * 57.29578f,
+                 in.reactive ? "yes" : (g_set.fsrReactive ? "not found" : "off"));
+    }
+    if (!ok) {
         Restore(cl, s);
         Fail(err);
         return false;
@@ -312,18 +388,21 @@ bool OnAccumulate(command_list* cl, ListState& s) {
     cl->barrier(output, resource_usage::unordered_access, resource_usage::unordered_access);
     Restore(cl, s);
 
-    const std::string mode = std::to_string(renderW) + "x" + std::to_string(renderH) + " -> " + std::to_string(outW) +
-                             "x" + std::to_string(outH);
+    const std::string mode = std::string(tech == Tech::Dlss ? "DLSS " : "FSR ") + std::to_string(renderW) + "x" +
+                             std::to_string(renderH) + " -> " + std::to_string(outW) + "x" + std::to_string(outH);
     std::lock_guard<std::mutex> lock(g_statusMutex);
     if (!g_replaced++ || !g_lastError.empty() || mode != g_mode)
-        Log("DLSS running: %s, jitter %.3f %.3f px, pre-exposure %.3f%s", mode.c_str(), in.jitterX, in.jitterY,
-            in.preExposure, in.reset ? ", reset" : "");
+        Log("%s running: %s, jitter %.3f %.3f px, pre-exposure %.3f%s%s", tech == Tech::Dlss ? "DLSS" : "FSR",
+            mode.c_str(), jitterX, jitterY, preExposure, extra, reset ? ", reset" : "");
     g_mode = mode;
     g_lastError.clear();
     return true;
 }
 
-void OnDestroyDevice(device*) { dlss::Shutdown(); }
+void OnDestroyDevice(device*) {
+    dlss::Shutdown();
+    fsr::Shutdown();
+}
 
 bool g_keyWasDown = false;
 
@@ -336,19 +415,25 @@ bool UpscalerOnDispatch(command_list* cl) {
     if (!s) return false;
     const uint32_t id = PipelineCs(s->pipe);
     switch (id) {
-        case kDepthCs: s->chain.depth = ComputeView(cl->get_device(), s->compute, 0, true); return false;
-        case kVelocityCs:  // the first of FSR 2's inputs in each frame (then depth, then colour)
+        case kReactiveCs:  // FSR 2's passes in order: reactive mask, velocity, depth, luminance (colour)
             s->chain = Chain();
-            s->chain.motion = ComputeView(cl->get_device(), s->compute, 0, true);
+            s->chain.reactive = ComputeView(cl->get_device(), s->compute, 0, true);
             return false;
+        case kVelocityCs: s->chain.motion = ComputeView(cl->get_device(), s->compute, 0, true); return false;
+        case kDepthCs: s->chain.depth = ComputeView(cl->get_device(), s->compute, 0, true); return false;
         case kLumaCs: s->chain.color = ComputeView(cl->get_device(), s->compute, 0, false); return false;
-        case kAccumulateCs: return g_set.enabled && OnAccumulate(cl, *s);
+        case kAccumulateCs: {
+            const bool replaced = g_set.enabled && OnAccumulate(cl, *s);
+            s->chain = Chain();  // each frame gathers its own inputs
+            return replaced;
+        }
         default: return false;
     }
 }
 
 void UpscalerPresent(swapchain*) {
     dlss::EndFrame();
+    fsr::EndFrame();
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
     GetWindowThreadProcessId(fg, &pid);
@@ -356,21 +441,29 @@ void UpscalerPresent(swapchain*) {
     if (down && !g_keyWasDown) {
         g_set.enabled = !g_set.enabled;
         SaveSettings();
-        Log("DLSS %s (F9)", g_set.enabled ? "on" : "off");
+        Log("Upscaling %s (F9)", g_set.enabled ? "on" : "off");
     }
     g_keyWasDown = down;
 }
 
 void UpscalerOverlay() {
-    bool changed = ImGui::Checkbox("DLSS in place of FSR 2 (F9)", &g_set.enabled);
+    bool changed = ImGui::Checkbox("Replace the game's FSR 2 (F9)", &g_set.enabled);
     ImGui::TextDisabled("Turn FSR 2 on in the game; its quality sets the render size (Quality 67%%, Balanced 59%%,");
     ImGui::TextDisabled("Performance 50%%, Ultra Performance 33%%). The game's sharpness setting still applies.");
+    const char* techs[] = {"Auto (DLSS on RTX, else FSR)", "DLSS", "FSR 3.1 / FSR 4"};
+    if (g_set.upscaler < 0 || g_set.upscaler > 2) g_set.upscaler = 0;
+    changed |= ImGui::Combo("Upscaler", &g_set.upscaler, techs, 3);
+    ImGui::TextDisabled("FSR: AMD's runtime picks FSR 4 on Radeon GPUs that support it, FSR 3.1 on the others.");
     const char* presets[] = {"DLSS default", "J (transformer)", "K (transformer, recommended)"};
     int idx = g_set.preset == 10 ? 1 : g_set.preset == 11 ? 2 : 0;
-    if (ImGui::Combo("Model preset", &idx, presets, 3)) {
+    if (ImGui::Combo("DLSS model", &idx, presets, 3)) {
         g_set.preset = idx == 1 ? 10 : idx == 2 ? 11 : 0;
         changed = true;
     }
+    changed |= ImGui::Checkbox("FSR: use the game's reactive mask", &g_set.fsrReactive);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The mask the game makes for its FSR 2 (particles, transparent effects):\n"
+                          "FSR 3.1 trusts the current frame more there. FSR 4 ignores it.");
     if (ImGui::TreeNode("Testing")) {
         changed |= ImGui::Checkbox("Flip jitter X", &g_set.flipJitterX);
         ImGui::SameLine();
@@ -385,6 +478,7 @@ void UpscalerOverlay() {
         mode = g_mode;
     }
     ImGui::TextDisabled("DLSS: %s", dlss::Status().c_str());
+    ImGui::TextDisabled("FSR: %s", fsr::Status().c_str());
     if (g_set.enabled && !err.empty()) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", err.c_str());
 }
 
@@ -398,7 +492,8 @@ void UpscalerInit() {
     reshade::register_event<reshade::addon_event::push_descriptors>(&OnPushDescriptors);
     reshade::register_event<reshade::addon_event::push_constants>(&OnPushConstants);
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
-    Log("DLSS %s at start (F9 toggles)", g_set.enabled ? "on" : "off");
+    Log("Upscaling %s at start (F9 toggles), upscaler setting %d (0 auto, 1 DLSS, 2 FSR)", g_set.enabled ? "on" : "off",
+        g_set.upscaler);
 }
 
 void UpscalerShutdown() {
