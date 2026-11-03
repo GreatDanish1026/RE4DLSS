@@ -24,6 +24,7 @@
 
 #include "common.hpp"
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -91,6 +92,8 @@ void SaveSettings() {
 std::mutex g_statusMutex;
 std::string g_lastError, g_lastLogged, g_mode;
 Tech g_active = Tech::Auto;  // the backend that ran last
+std::atomic<uint64_t> g_presents{0}, g_lastRun{0};  // present count, and when an upscaler last ran
+const char* TechName(int t) { return t == 1 ? "DLSS" : t == 2 ? "FSR 3.1 / FSR 4" : "Auto"; }
 uint64_t g_replaced = 0;
 
 void Fail(const std::string& why) {
@@ -396,6 +399,7 @@ bool OnAccumulate(command_list* cl, ListState& s) {
             mode.c_str(), jitterX, jitterY, preExposure, extra, reset ? ", reset" : "");
     g_mode = mode;
     g_lastError.clear();
+    g_lastRun = g_presents.load() + 1;
     return true;
 }
 
@@ -431,9 +435,16 @@ bool UpscalerOnDispatch(command_list* cl) {
     }
 }
 
-void UpscalerPresent(swapchain*) {
+void UpscalerPresent(swapchain* sc) {
     dlss::EndFrame();
     fsr::EndFrame();
+    ++g_presents;
+    // Load AMD's runtime as soon as FSR is chosen, so the log and overlay say at once whether it
+    // can run (not only when the game next runs its FSR 2 passes).
+    if (g_set.upscaler == static_cast<int>(Tech::Fsr)) {
+        std::string err;
+        fsr::Init(reinterpret_cast<ID3D12Device*>(sc->get_device()->get_native()), err);
+    }
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
     GetWindowThreadProcessId(fg, &pid);
@@ -452,7 +463,10 @@ void UpscalerOverlay() {
     ImGui::TextDisabled("Performance 50%%, Ultra Performance 33%%). The game's sharpness setting still applies.");
     const char* techs[] = {"Auto (DLSS on RTX, else FSR)", "DLSS", "FSR 3.1 / FSR 4"};
     if (g_set.upscaler < 0 || g_set.upscaler > 2) g_set.upscaler = 0;
-    changed |= ImGui::Combo("Upscaler", &g_set.upscaler, techs, 3);
+    if (ImGui::Combo("Upscaler", &g_set.upscaler, techs, 3)) {
+        changed = true;
+        Log("Upscaler setting: %s", TechName(g_set.upscaler));
+    }
     ImGui::TextDisabled("FSR: AMD's runtime picks FSR 4 on Radeon GPUs that support it, FSR 3.1 on the others.");
     const char* presets[] = {"DLSS default", "J (transformer)", "K (transformer, recommended)"};
     int idx = g_set.preset == 10 ? 1 : g_set.preset == 11 ? 2 : 0;
@@ -477,6 +491,14 @@ void UpscalerOverlay() {
         err = g_lastError;
         mode = g_mode;
     }
+    const uint64_t presents = g_presents.load(), lastRun = g_lastRun.load();
+    if (!g_set.enabled)
+        ImGui::TextDisabled("Now running: the game's FSR 2 (upscaling off, F9)");
+    else if (lastRun && presents < lastRun + 30)
+        ImGui::Text("Now running: %s", mode.c_str());
+    else
+        ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1),
+                           "Now running: nothing to replace (the game isn't running FSR 2: turn it on, or leave the menu)");
     ImGui::TextDisabled("DLSS: %s", dlss::Status().c_str());
     ImGui::TextDisabled("FSR: %s", fsr::Status().c_str());
     if (g_set.enabled && !err.empty()) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", err.c_str());
