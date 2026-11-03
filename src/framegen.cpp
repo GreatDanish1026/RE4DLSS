@@ -591,6 +591,158 @@ bool CalledFromStreamline(void* returnAddress) {
 
 thread_local bool t_creating = false;
 
+// True if REFramework (dinput8.dll in the game folder) is on the call stack: its D3D12 hook creates
+// a test swapchain of its own, which must stay a plain one.
+bool CalledByReFramework() {
+    void* frames[48] = {};
+    const USHORT n = RtlCaptureStackBackTrace(1, 48, frames, nullptr);
+    static const std::wstring self = ExeDir() + L"dinput8.dll";
+    for (USHORT i = 0; i < n; ++i) {
+        HMODULE mod = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                static_cast<LPCWSTR>(frames[i]), &mod))
+            continue;
+        wchar_t path[MAX_PATH] = {};
+        GetModuleFileNameW(mod, path, MAX_PATH);
+        if (_wcsicmp(path, self.c_str()) == 0) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------- REFramework and Streamline
+//
+// REFramework (the RE Engine mod loader) hooks linkSwapchainToCmdQueue in Streamline's
+// sl.dlss_g.dll when that DLL loads. Its hook first waits until REFramework has finished starting,
+// which only happens after the game's first frame; called while the game creates its swapchain
+// (on the thread that would render that first frame), it waits forever and the game hangs at
+// launch. REFramework's hook does nothing else on that first call, so while the game's swapchain
+// is created through Streamline, the patched bytes in sl.dlss_g.dll's code are put back to the
+// DLL's own (from the signed file on disk, relocated) and REFramework's patch is restored after.
+
+struct CodePatch {
+    uint8_t* at = nullptr;
+    std::vector<uint8_t> patched, original;
+};
+
+std::vector<uint8_t> ReadFileBytes(const wchar_t* path) {
+    std::vector<uint8_t> data;
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return data;
+    LARGE_INTEGER size = {};
+    if (GetFileSizeEx(f, &size) && size.QuadPart > 0 && size.QuadPart < (64ll << 20)) {
+        data.resize(static_cast<size_t>(size.QuadPart));
+        DWORD read = 0;
+        if (!ReadFile(f, data.data(), static_cast<DWORD>(data.size()), &read, nullptr) || read != data.size()) data.clear();
+    }
+    CloseHandle(f);
+    return data;
+}
+
+// The places where <mod>'s code in memory differs from its file (relocations applied).
+std::vector<CodePatch> FindCodePatches(HMODULE mod, std::string& why) {
+    std::vector<CodePatch> out;
+    wchar_t path[MAX_PATH] = {};
+    if (!GetModuleFileNameW(mod, path, MAX_PATH)) return (why = "no module path"), out;
+    const std::vector<uint8_t> file = ReadFileBytes(path);
+    if (file.size() < 4096) return (why = "couldn't read the DLL"), out;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(file.data());
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || size_t(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS64) > file.size())
+        return (why = "not a PE file"), out;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(file.data() + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        return (why = "not a 64-bit PE file"), out;
+    const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+    const unsigned nsec = nt->FileHeader.NumberOfSections;
+    const auto rvaToOffset = [&](uint32_t rva) -> int64_t {
+        for (unsigned i = 0; i < nsec; ++i)
+            if (rva >= sec[i].VirtualAddress && rva < sec[i].VirtualAddress + sec[i].SizeOfRawData)
+                return int64_t(sec[i].PointerToRawData) + (rva - sec[i].VirtualAddress);
+        return -1;
+    };
+    const uint64_t delta = reinterpret_cast<uint64_t>(mod) - nt->OptionalHeader.ImageBase;
+    const IMAGE_DATA_DIRECTORY relocDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    for (unsigned s = 0; s < nsec; ++s) {
+        if (!(sec[s].Characteristics & IMAGE_SCN_CNT_CODE)) continue;
+        const uint32_t va = sec[s].VirtualAddress;
+        const uint32_t size = sec[s].Misc.VirtualSize < sec[s].SizeOfRawData ? sec[s].Misc.VirtualSize : sec[s].SizeOfRawData;
+        if (size_t(sec[s].PointerToRawData) + size > file.size()) return (why = "truncated code section"), std::vector<CodePatch>();
+        std::vector<uint8_t> image(file.begin() + sec[s].PointerToRawData, file.begin() + sec[s].PointerToRawData + size);
+        // Base relocations inside this section, as the loader applied them.
+        int64_t off = relocDir.VirtualAddress ? rvaToOffset(relocDir.VirtualAddress) : -1;
+        const int64_t end = off + relocDir.Size;
+        while (off >= 0 && off + int64_t(sizeof(IMAGE_BASE_RELOCATION)) <= end && size_t(end) <= file.size()) {
+            const auto* block = reinterpret_cast<const IMAGE_BASE_RELOCATION*>(file.data() + off);
+            if (block->SizeOfBlock < sizeof(IMAGE_BASE_RELOCATION)) break;
+            const unsigned n = (block->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / 2;
+            const auto* e = reinterpret_cast<const WORD*>(block + 1);
+            for (unsigned i = 0; i < n; ++i) {
+                if ((e[i] >> 12) != IMAGE_REL_BASED_DIR64) continue;
+                const uint32_t rva = block->VirtualAddress + (e[i] & 0xfff);
+                if (rva >= va && rva + 8 <= va + size) {
+                    uint64_t v;
+                    memcpy(&v, &image[rva - va], 8);
+                    v += delta;
+                    memcpy(&image[rva - va], &v, 8);
+                }
+            }
+            off += block->SizeOfBlock;
+        }
+        // Runs of differing bytes (gaps of a few equal bytes merged).
+        const uint8_t* mem = reinterpret_cast<const uint8_t*>(mod) + va;
+        for (uint32_t i = 0; i < size;) {
+            if (mem[i] == image[i]) {
+                ++i;
+                continue;
+            }
+            uint32_t j = i, lastDiff = i;
+            while (j < size && j - lastDiff <= 4) {
+                if (mem[j] != image[j]) lastDiff = j;
+                ++j;
+            }
+            CodePatch p;
+            p.at = const_cast<uint8_t*>(mem) + i;
+            p.patched.assign(mem + i, mem + lastDiff + 1);
+            p.original.assign(image.begin() + i, image.begin() + lastDiff + 1);
+            out.push_back(std::move(p));
+            if (out.size() > 4 || out.back().patched.size() > 32) return (why = "more changes than one hook"), std::vector<CodePatch>();
+            i = lastDiff + 1;
+        }
+    }
+    return out;
+}
+
+void WriteCode(uint8_t* at, const std::vector<uint8_t>& bytes) {
+    DWORD old = 0;
+    if (!VirtualProtect(at, bytes.size(), PAGE_EXECUTE_READWRITE, &old)) return;
+    memcpy(at, bytes.data(), bytes.size());
+    VirtualProtect(at, bytes.size(), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, bytes.size());
+}
+
+// While alive, sl.dlss_g.dll's code is as NVIDIA shipped it (REFramework's hook undone).
+struct UnhookedDlssG {
+    std::vector<CodePatch> patches;
+    UnhookedDlssG() {
+        HMODULE mod = GetModuleHandleW(L"sl.dlss_g.dll");
+        if (!mod) return;
+        std::string why;
+        patches = FindCodePatches(mod, why);
+        if (!why.empty()) {
+            Log("frame generation: sl.dlss_g.dll check: %s (left as is)", why.c_str());
+            return;
+        }
+        if (patches.empty()) return;
+        size_t bytes = 0;
+        for (const CodePatch& p : patches) bytes += p.patched.size(), WriteCode(p.at, p.original);
+        Log("frame generation: another mod (REFramework) hooks sl.dlss_g.dll: its hook (%zu bytes) is skipped while "
+            "the game's swapchain is created",
+            bytes);
+    }
+    ~UnhookedDlssG() {
+        for (const CodePatch& p : patches) WriteCode(p.at, p.patched);
+    }
+};
+
 bool InitStreamline(ID3D12Device* device, std::string& error);
 
 // Starts Streamline (once) for the device of the queue the game creates its swapchain on.
@@ -718,11 +870,16 @@ HRESULT STDMETHODCALLTYPE HookCreateSwapChain(IDXGIFactory* f, IUnknown* dev, DX
         HookFsrProxy(*out);
         return hr;
     }
-    if (t_creating || CalledFromStreamline(caller) || !EnsureStreamline(dev)) return g_createSwapChain(f, dev, desc, out);
+    if (t_creating || CalledFromStreamline(caller) || CalledByReFramework() || !EnsureStreamline(dev))
+        return g_createSwapChain(f, dev, desc, out);
     void* proxy = UpgradeFactory(f);
     if (!proxy) return g_createSwapChain(f, dev, desc, out);
     t_creating = true;
-    const HRESULT hr = static_cast<IDXGIFactory*>(proxy)->CreateSwapChain(dev, desc, out);
+    HRESULT hr;
+    {
+        UnhookedDlssG unhooked;
+        hr = static_cast<IDXGIFactory*>(proxy)->CreateSwapChain(dev, desc, out);
+    }
     t_creating = false;
     static_cast<IUnknown*>(proxy)->Release();
     if (SUCCEEDED(hr) && out && *out) HookProxyPresent(*out);
@@ -743,12 +900,16 @@ HRESULT STDMETHODCALLTYPE HookCreateForHwnd(IDXGIFactory2* f, IUnknown* dev, HWN
         HookFsrProxy(*out);
         return hr;
     }
-    if (t_creating || CalledFromStreamline(caller) || !EnsureStreamline(dev))
+    if (t_creating || CalledFromStreamline(caller) || CalledByReFramework() || !EnsureStreamline(dev))
         return g_createForHwnd(f, dev, hwnd, desc, fs, output, out);
     void* proxy = UpgradeFactory(f);
     if (!proxy) return g_createForHwnd(f, dev, hwnd, desc, fs, output, out);
     t_creating = true;
-    const HRESULT hr = static_cast<IDXGIFactory2*>(proxy)->CreateSwapChainForHwnd(dev, hwnd, desc, fs, output, out);
+    HRESULT hr;
+    {
+        UnhookedDlssG unhooked;
+        hr = static_cast<IDXGIFactory2*>(proxy)->CreateSwapChainForHwnd(dev, hwnd, desc, fs, output, out);
+    }
     t_creating = false;
     static_cast<IUnknown*>(proxy)->Release();
     if (SUCCEEDED(hr) && out && *out) HookProxyPresent(*out);
@@ -1267,8 +1428,7 @@ void FrameGenTag(ID3D12GraphicsCommandList* list, ID3D12Resource* depth, ID3D12R
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     if (!g_ready || !g_set.enabled || !Frames()) return;
     if (!g_camera.valid) return void(++g_tagWhy["no camera"]);
-    const Camera cam = g_camera;
-    g_camera.valid = false;  // each frame needs its own
+    const Camera cam = g_camera;  // the last good one: a frame without a fresh SceneInfo keeps it
     sl::Constants c{};
     float inv[16], prevToCur[16];
     ToSl(c.cameraViewToClip, cam.viewToClip);

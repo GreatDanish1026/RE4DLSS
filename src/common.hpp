@@ -49,6 +49,7 @@ void UnregisterFrameGen();
 void DrawFrameGenSettings();
 void DrawFrameGenStatus();
 std::string FrameGenHeadline(bool* warn);
+std::string FrameGenDiag();  // inputs tagged / frames without them since the last call, and why
 // True while frame generation wants each frame's camera (the upscaler then looks for SceneInfo).
 bool FrameGenWantsCamera();
 // RE Engine's SceneInfo constant buffer (kSceneInfoBytes) of the frame's main view.

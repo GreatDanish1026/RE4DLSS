@@ -64,6 +64,9 @@ function Copy-Runtime([string]$dest) {
     foreach ($f in $ffxFiles) { Copy-Item "$ffx\$f" $dest -Force }
     New-Item -ItemType Directory -Force "$dest\streamline" | Out-Null
     foreach ($f in $slFiles) { Copy-Item "$sl\$f" "$dest\streamline" -Force }
+    # Streamline starts NGX first, with the streamline folder as where DLSS lives: DLSS upscaling
+    # then looks there too.
+    Copy-Item $ngx "$dest\streamline" -Force
 }
 
 if ($Install) {

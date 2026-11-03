@@ -185,8 +185,13 @@ void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
     void* data = nullptr;
     if (!dev->map_buffer_region(r.buffer, r.offset, kSceneInfoBytes, map_access::read_only, &data) || !data) return;
     const float* f = static_cast<const float*>(data);
+    // Right size, a view-projection matrix, unit view axes (transposeViewInvMat, floats 28-39) and
+    // a near plane: another buffer with the same screen size but zero matrices exists too.
+    const auto axis = [&](int c) { return f[28 + c] * f[28 + c] + f[32 + c] * f[32 + c] + f[36 + c] * f[36 + c]; };
     const bool match = f[kScreenSizeFloat] == static_cast<float>(w) && f[kScreenSizeFloat + 1] == static_cast<float>(h) &&
-                       std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f;
+                       std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f &&
+                       std::fabs(f[0]) + std::fabs(f[5]) > 1e-3f && std::fabs(axis(0) - 1) < 1e-2f &&
+                       std::fabs(axis(1) - 1) < 1e-2f && f[98] > 0;
     if (match) {
         memcpy(s.scene, f, kSceneInfoBytes);
         s.sceneValid = true;
@@ -533,6 +538,10 @@ void UpscalerPresent(swapchain* sc) {
     dlss::EndFrame();
     fsr::EndFrame();
     ++g_presents;
+    if (g_presents % 600 == 0) {
+        const std::string d = FrameGenDiag();
+        if (!d.empty() && d.find("frames untagged 0,") == std::string::npos) Log("frame generation diag:%s", d.c_str());
+    }
     // Load AMD's runtime as soon as FSR is chosen, so the log and overlay say at once whether it
     // can run (not only when the game next runs its FSR 2 passes).
     if (g_set.upscaler == static_cast<int>(Tech::Fsr)) {
