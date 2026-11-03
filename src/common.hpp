@@ -55,6 +55,12 @@ bool FrameGenWantsCamera();
 // RE Engine's SceneInfo constant buffer (kSceneInfoBytes) of the frame's main view.
 constexpr uint32_t kSceneInfoBytes = 528;
 void FrameGenSetSceneInfo(const float* scene);
+// The picture before the HUD, drawn by the upscaler: whether frame generation wants it, the
+// render target to draw it into (back buffer size and format; left in the shader-resource state),
+// and that it was drawn on <cl> (handed to frame generation when <cl> is submitted).
+bool FrameGenWantsHudless();
+bool FrameGenHudlessTarget(reshade::api::device* dev, reshade::api::resource* tex, reshade::api::resource_view* rtv);
+void FrameGenHudlessDrawn(reshade::api::command_list* cl);
 // This frame's depth (r32f, reversed Z) and motion vectors (UV offsets, previous minus current),
 // both in D3D12 resource state <state>, tagged on <list>.
 void FrameGenTag(ID3D12GraphicsCommandList* list, ID3D12Resource* depth, ID3D12Resource* motion, unsigned state,

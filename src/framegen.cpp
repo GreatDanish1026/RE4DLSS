@@ -83,7 +83,7 @@ struct Settings {
     // FSR: what it compares the back buffer with to find the HUD (fsrfg::HudMode); ini FsrHudMode.
     int fsrHud = 0;
 } g_set;
-const char* const kFsrHudNames[] = {"Composite (recommended)", "Picture before the HUD", "Off"};
+const char* const kFsrHudNames[] = {"On (recommended)", "On", "Off"};  // RE4: both "on" modes use the picture before the HUD
 
 uint32_t g_maxFrames = 1;  // DLSSGState::numFramesToGenerateMax
 bool g_dynamicSupported = false, g_capsKnown = false;
@@ -237,8 +237,10 @@ uint32_t g_bbWidth = 0, g_bbHeight = 0;
 format g_bbFormat = format::unknown;
 swapchain* g_rsSwapchain = nullptr;  // ReShade's view of the game's swapchain (its colour space)
 resource g_hudlessTex = {0};
+resource_view g_hudlessRtv = {0};  // RE4: the add-on draws the picture before the HUD into it
 resource g_uiReadback = {0};  // one row of the HUD layer, for its check
 device* g_hudlessDevice = nullptr;
+bool g_hudlessFailed = false;
 std::atomic<uint64_t> g_hudlessCount{0};
 
 // The HUD mask: ui_alpha.hlsl writes the layer's alpha (flipped if inverted) to an r8 texture.
@@ -1064,6 +1066,7 @@ void OnInitDevice(device* dev) {
 void OnDestroyDevice(device* dev) {
     if (dev->get_api() != device_api::d3d12) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (g_hudlessRtv.handle && g_hudlessDevice == dev) dev->destroy_resource_view(g_hudlessRtv), g_hudlessRtv = {0};
     if (g_hudlessTex.handle && g_hudlessDevice == dev) dev->destroy_resource(g_hudlessTex), g_hudlessTex = {0};
     if (g_uiReadback.handle && g_hudlessDevice == dev) dev->destroy_resource(g_uiReadback), g_uiReadback = {0};
     if (g_hudlessDevice == dev) DestroyMask(dev);
@@ -1377,6 +1380,7 @@ void OnInitSwapchain(swapchain* sc, bool) {
     const resource_desc d = sc->get_device()->get_resource_desc(bb);
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     if (g_hudlessTex.handle && (d.texture.width != g_bbWidth || d.texture.height != g_bbHeight || d.texture.format != g_bbFormat)) {
+        if (g_hudlessRtv.handle) g_hudlessDevice->destroy_resource_view(g_hudlessRtv), g_hudlessRtv = {0};
         g_hudlessDevice->destroy_resource(g_hudlessTex);  // resize: the game waits for the GPU first
         g_hudlessTex = {0};
         DestroyMask(g_hudlessDevice);
@@ -1410,6 +1414,40 @@ std::string FrameGenDiag() {
 
 bool FrameGenWantsCamera() { return g_set.enabled && g_ready; }
 
+bool FrameGenWantsHudless() {
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    return g_set.enabled && g_ready && Frames() && g_bbWidth && !g_hudlessFailed;
+}
+
+bool FrameGenHudlessTarget(device* dev, resource* tex, resource_view* rtv) {
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (!g_ready || !g_bbWidth || g_hudlessFailed) return false;
+    if (!g_hudlessTex.handle) {
+        const resource_desc d(g_bbWidth, g_bbHeight, 1, 1, g_bbFormat, 1, memory_heap::default_,
+                              resource_usage::shader_resource | resource_usage::render_target);
+        if (!dev->create_resource(d, nullptr, resource_usage::shader_resource, &g_hudlessTex) ||
+            !dev->create_resource_view(g_hudlessTex, resource_usage::render_target, resource_view_desc(g_bbFormat), &g_hudlessRtv)) {
+            if (g_hudlessTex.handle) dev->destroy_resource(g_hudlessTex), g_hudlessTex = {0};
+            g_hudlessFailed = true;
+            Log("frame generation: couldn't create the %ux%u picture-before-the-HUD texture (format %u)", g_bbWidth, g_bbHeight,
+                static_cast<uint32_t>(g_bbFormat));
+            return false;
+        }
+        g_hudlessDevice = dev;
+        Log("frame generation: picture-before-the-HUD texture %ux%u, format %u", g_bbWidth, g_bbHeight,
+            static_cast<uint32_t>(g_bbFormat));
+    }
+    *tex = g_hudlessTex, *rtv = g_hudlessRtv;
+    return true;
+}
+
+void FrameGenHudlessDrawn(command_list* cl) {
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (!g_ready || !Frames()) return;
+    if (kTagAtRecord) GiveHud(TargetFrame(g_hudless), false, reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()));
+    else g_pendingHud[cl->get_native()].mask = false;  // handed over when the list is submitted
+}
+
 bool FrameGenIsScreen(unsigned width, unsigned height) {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     return g_bbWidth && width == g_bbWidth && height == g_bbHeight;
@@ -1432,12 +1470,18 @@ void FrameGenTag(ID3D12GraphicsCommandList* list, ID3D12Resource* depth, ID3D12R
     sl::Constants c{};
     float inv[16], prevToCur[16];
     ToSl(c.cameraViewToClip, cam.viewToClip);
-    if (!Invert(cam.viewToClip, inv) || !Invert(cam.clipToPrevClip, prevToCur)) return void(++g_tagWhy["matrix"]);
-    ToSl(c.clipToCameraView, inv);
     const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    if (!Invert(cam.viewToClip, inv)) return void(++g_tagWhy["projection"]);
+    bool noPrevious = false;  // no previous-frame camera (a camera cut): no camera motion, history reset
+    if (!Invert(cam.clipToPrevClip, prevToCur)) {
+        noPrevious = true;
+        ++g_tagWhy["no previous camera (reset)"];
+    }
+    ToSl(c.clipToCameraView, inv);
     ToSl(c.clipToLensClip, identity);
-    ToSl(c.clipToPrevClip, cam.clipToPrevClip);
-    ToSl(c.prevClipToClip, prevToCur);
+    ToSl(c.clipToPrevClip, noPrevious ? identity : cam.clipToPrevClip);
+    ToSl(c.prevClipToClip, noPrevious ? identity : prevToCur);
+    reset = reset || noPrevious;
     c.jitterOffset = sl::float2(jitterX, jitterY);
     c.mvecScale = sl::float2(1, 1);  // the game's motion vectors are already UV offsets
     c.cameraPinholeOffset = sl::float2(0, 0);
@@ -1595,11 +1639,9 @@ void DrawFrameGenSettings() {
             reshade::set_config_value(nullptr, RD_PRODUCT, "FsrHudMode", g_set.fsrHud);
             Log("settings: FSR HUD protection %s", kFsrHudNames[g_set.fsrHud]);
         }
-        Help("How FSR keeps the HUD and subtitles from warping (HDR only: in SDR the game draws its HUD straight "
-             "onto the screen).\n\nComposite: FSR compares the screen with a copy that differs only where the "
-             "game's HUD layer has something. Recommended.\nPicture before the HUD: the game's own copy from "
-             "before the HUD; in this game it also differs around characters, which then jitter.\nOff: the HUD "
-             "is generated like the rest of the picture and may wobble.\n\nSwitches right away.");
+        Help("How FSR keeps the HUD and subtitles from warping: it compares the screen with the same picture "
+             "drawn without the HUD (the add-on repeats the game's last pass for it).\n\nOn: recommended.\nOff: "
+             "the HUD is generated like the rest of the picture and may wobble.\n\nSwitches right away.");
         return;
     }
 

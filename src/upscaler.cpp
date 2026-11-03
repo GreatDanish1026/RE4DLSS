@@ -18,6 +18,12 @@
 // upscales, and the camera from RE Engine's SceneInfo constant buffer: the root constant buffer
 // whose screenSize (byte 368) is the render size, seen in the frame before FSR 2 runs.
 //
+// The picture before the HUD (for frame generation): the game copies its finished scene
+// (ps792d66db's target) into the texture it draws the HUD into, then its final pass (ps9d1f6421,
+// RenoDX's HDR output when installed) writes that texture to the back buffer. Right after that
+// pass, the scene is copied into the HUD texture again and the same draw is repeated, with all the
+// game's (and RenoDX's) state, into a render target of ours: the screen without the HUD.
+//
 // NGX records its own compute state and descriptor heaps on the game's command list, so the
 // game's bindings are tracked per command list and put back afterwards (as in VillageDLSS).
 
@@ -51,6 +57,7 @@ constexpr uint32_t kDepthCs = 0xd2efdab0;       // CS_UpscalingDepthTranslation
 constexpr uint32_t kVelocityCs = 0x5469503e;    // CS_UpscalingVelocityTranslate
 constexpr uint32_t kLumaCs = 0xaa8d773e;        // FSR 2 luminance pyramid (t0 = render-size colour)
 constexpr uint32_t kAccumulateCs = 0x226d3330;  // FSR 2 accumulate (u0 = output-size image)
+constexpr uint32_t kFinalPs = 0x9d1f6421;       // the scene + HUD texture -> back buffer
 constexpr int kToggleHotkey = VK_F9;
 
 // cbFSR2 (FSR 2.1), as 32-bit words.
@@ -148,6 +155,13 @@ struct __declspec(uuid("4c2a9e17-6b3d-4f81-a5c0-9d2e7b1f3a64")) ListState {
     bool sceneValid = false;
     buffer_range checked[8] = {};  // constant buffers looked at on this list (most are bound many times)
     uint32_t checkedNext = 0;
+    // The picture before the HUD: the render target bound, the last copy between two textures of
+    // the same size and format (scene -> HUD texture) with their states since, and the final pass.
+    resource_view rtv = {0};
+    resource copySrc = {0}, copyDst = {0};
+    resource_usage srcState = resource_usage::undefined, dstState = resource_usage::undefined;
+    bool hudPending = false;
+    uint32_t hudVertices = 0, hudInstances = 0;
 };
 
 // SceneInfo search: the render size it must have (from the last cbFSR2), and the last one found on
@@ -168,6 +182,40 @@ StageState* Stage(ListState* s, shader_stage stages) {
 }
 
 void OnInitList(command_list* cl) { cl->create_private_data<ListState>(); }
+
+void OnBindRts(command_list* cl, uint32_t count, const resource_view* rtvs, resource_view) {
+    if (ListState* s = State(cl)) s->rtv = count ? rtvs[0] : resource_view{0};
+}
+
+bool OnCopy(command_list* cl, resource src, resource dst) {
+    ListState* s = State(cl);
+    if (!s) return false;
+    device* dev = cl->get_device();
+    const resource_desc a = dev->get_resource_desc(src), b = dev->get_resource_desc(dst);
+    if (a.type == resource_type::texture_2d && b.type == resource_type::texture_2d && a.texture.width == b.texture.width &&
+        a.texture.height == b.texture.height && a.texture.format == b.texture.format &&
+        a.texture.format == format::r16g16b16a16_float) {
+        s->copySrc = src, s->copyDst = dst;
+        s->srcState = resource_usage::copy_source, s->dstState = resource_usage::copy_dest;
+    }
+    return false;
+}
+
+void DrawHudless(command_list* cl, ListState& s);
+
+void OnBarrier(command_list* cl, uint32_t count, const resource* res, const resource_usage* before, const resource_usage* after) {
+    ListState* s = State(cl);
+    if (!s) return;
+    if (s->hudPending) {  // the game's final pass is recorded: ours goes right after it
+        s->hudPending = false;
+        DrawHudless(cl, *s);
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (res[i] == s->copySrc) s->srcState = after[i];
+        if (res[i] == s->copyDst) s->dstState = after[i];
+    }
+    (void)before;
+}
 
 // Is this constant buffer SceneInfo (screenSize = the render size, 1 / screenSize after it)? Keeps
 // a copy on the list if so. Each buffer range is looked at once per list.
@@ -466,6 +514,30 @@ void OnDestroyDevice(device*) {
     fsr::Shutdown();
 }
 
+// After the game's final pass: the scene back into the HUD texture, the same draw into our
+// render target, the game's render target back.
+uint64_t g_hudlessDrawn = 0;
+void DrawHudless(command_list* cl, ListState& s) {
+    device* dev = cl->get_device();
+    resource tex = {0};
+    resource_view rtv = {0};
+    if (!s.rtv.handle || !s.copySrc.handle || !FrameGenHudlessTarget(dev, &tex, &rtv)) return;
+    const resource_usage srcWas = s.srcState, dstWas = s.dstState;
+    if (srcWas == resource_usage::undefined || dstWas == resource_usage::undefined) return;
+    if (srcWas != resource_usage::copy_source) cl->barrier(s.copySrc, srcWas, resource_usage::copy_source);
+    if (dstWas != resource_usage::copy_dest) cl->barrier(s.copyDst, dstWas, resource_usage::copy_dest);
+    cl->copy_resource(s.copySrc, s.copyDst);
+    if (srcWas != resource_usage::copy_source) cl->barrier(s.copySrc, resource_usage::copy_source, srcWas);
+    if (dstWas != resource_usage::copy_dest) cl->barrier(s.copyDst, resource_usage::copy_dest, dstWas);
+    cl->barrier(tex, resource_usage::shader_resource, resource_usage::render_target);
+    cl->bind_render_targets_and_depth_stencil(1, &rtv);
+    cl->draw(s.hudVertices, s.hudInstances, 0, 0);
+    cl->bind_render_targets_and_depth_stencil(1, &s.rtv);
+    cl->barrier(tex, resource_usage::render_target, resource_usage::shader_resource);
+    FrameGenHudlessDrawn(cl);
+    if (++g_hudlessDrawn == 1) Log("frame generation: picture before the HUD drawn (final pass repeated without the HUD)");
+}
+
 // Frame generation's inputs for this frame: the camera (this list's SceneInfo, else the last one
 // seen), the game's converted depth and motion vectors (shader resource state, as FSR 2 left them),
 // FSR 2's render size, jitter and reset.
@@ -513,7 +585,17 @@ void RestoreListState(command_list* cl) {
     if (ListState* s = State(cl)) Restore(cl, *s);
 }
 
-bool UpscalerOnDraw(command_list*, uint32_t, uint32_t) { return false; }
+bool UpscalerOnDraw(command_list* cl, uint32_t vertices, uint32_t instances) {
+    ListState* s = State(cl);
+    if (!s || !s->pipe.handle || PipelinePs(s->pipe) != kFinalPs) return false;
+    // The final pass reads the HUD texture, filled from the scene by the last copy (the dst must
+    // still be in the shader-resource state the pass needs).
+    if (FrameGenWantsHudless() && s->copyDst.handle && s->rtv.handle) {
+        s->hudPending = true;
+        s->hudVertices = vertices, s->hudInstances = instances;
+    }
+    return false;
+}
 
 bool UpscalerOnDispatch(command_list* cl) {
     ListState* s = State(cl);
@@ -630,6 +712,9 @@ void UpscalerInit() {
     reshade::register_event<reshade::addon_event::push_descriptors>(&OnPushDescriptors);
     reshade::register_event<reshade::addon_event::push_constants>(&OnPushConstants);
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
+    reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&OnBindRts);
+    reshade::register_event<reshade::addon_event::copy_resource>(&OnCopy);
+    reshade::register_event<reshade::addon_event::barrier>(&OnBarrier);
     RegisterFrameGen();
     Log("Upscaling %s at start (F9 toggles), upscaler setting %d (0 auto, 1 DLSS, 2 FSR)", g_set.enabled ? "on" : "off",
         g_set.upscaler);
@@ -644,6 +729,9 @@ void UpscalerShutdown() {
     reshade::unregister_event<reshade::addon_event::push_descriptors>(&OnPushDescriptors);
     reshade::unregister_event<reshade::addon_event::push_constants>(&OnPushConstants);
     reshade::unregister_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
+    reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&OnBindRts);
+    reshade::unregister_event<reshade::addon_event::copy_resource>(&OnCopy);
+    reshade::unregister_event<reshade::addon_event::barrier>(&OnBarrier);
     UnregisterFrameGen();
 }
 
