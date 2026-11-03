@@ -1633,43 +1633,44 @@ void DrawFrameGenSettings() {
             ImGui::TextColored(kWarn, "%s isn't supported here, so %s.", kModeNames[g_set.mode],
                                kModeNames[EffectiveMode(g_set.mode)]);
     }
-    if (g_set.tech == kTechFsr) {  // the object separation is DLSS's; the HUD protection FSR's
-        ImGui::SetNextItemWidth(ControlWidth());
-        if (ImGui::Combo("HUD protection", &g_set.fsrHud, kFsrHudNames, fsrfg::kHudModeCount)) {
-            reshade::set_config_value(nullptr, RD_PRODUCT, "FsrHudMode", g_set.fsrHud);
-            Log("settings: FSR HUD protection %s", kFsrHudNames[g_set.fsrHud]);
-        }
-        Help("How FSR keeps the HUD and subtitles from warping: it compares the screen with the same picture "
-             "drawn without the HUD (the add-on repeats the game's last pass for it).\n\nOn: recommended.\nOff: "
-             "the HUD is generated like the rest of the picture and may wobble.\n\nSwitches right away.");
-        return;
-    }
+}
 
+void DrawFrameGenAdvanced() {
+    ImGui::SeparatorText("Frame generation");
+    ImGui::SetNextItemWidth(ControlWidth());
+    if (ImGui::Combo("FSR: HUD protection", &g_set.fsrHud, kFsrHudNames, fsrfg::kHudModeCount)) {
+        reshade::set_config_value(nullptr, RD_PRODUCT, "FsrHudMode", g_set.fsrHud);
+        Log("settings: FSR HUD protection %s", kFsrHudNames[g_set.fsrHud]);
+    }
+    Help("How FSR frame generation keeps the HUD and subtitles from warping: it compares the screen with the same "
+         "picture drawn without the HUD (the add-on repeats the game's last pass for it).\n\nOn: recommended.\n"
+         "Off: the HUD is generated like the rest of the picture and may wobble.\n\nSwitches right away. (DLSS "
+         "frame generation always gets the picture without the HUD.)");
     float sep = g_set.separation;
     ImGui::SetNextItemWidth(ControlWidth());
-    if (ImGui::SliderFloat("Object separation", &sep, 1, 40, "%.0f")) g_set.separation = sep;
+    if (ImGui::SliderFloat("DLSS: object separation", &sep, 1, 40, "%.0f")) g_set.separation = sep;
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         reshade::set_config_value(nullptr, RD_PRODUCT, "ObjectSeparation", g_set.separation);
         Log("settings: object separation %.0f", g_set.separation);
     }
-    Help("How far apart in depth two things must be for frame generation to move them separately (NVIDIA's "
+    Help("How far apart in depth two things must be for DLSS frame generation to move them separately (NVIDIA's "
          "default 40). Lower it if people moving in front of walls ghost.");
 }
 
 std::string FrameGenHeadline(bool* warn) {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     *warn = false;
-    if (!g_set.enabled) return "Frame generation off";
+    if (!g_set.enabled) return "Frame generation: off";
     if (!g_ready) {
         *warn = true;
         return g_initTried || g_factoryHooked ? "Frame generation: " + g_status
                                               : std::string("Frame generation: restart the game to start it");
     }
     if (!g_upgraded) return (*warn = true), "Frame generation not running: the game's swapchain wasn't handed over";
-    if (!g_fgOn) return "Frame generation paused (FSR 2 off in the game, menu or loading)";
-    if (Fsr()) return fsrfg::Version() + " on: 2x";
-    char buf[96];
-    snprintf(buf, sizeof(buf), "Frame generation %s: %u frames per rendered frame",
+    if (!g_fgOn) return "Frame generation: paused (menu, loading, or FSR 2 off in the game)";
+    if (Fsr()) return "Frame generation: " + fsrfg::Version() + " 2x";
+    char buf[128];
+    snprintf(buf, sizeof(buf), "Frame generation: DLSS %s (%u frames shown per rendered frame)",
              g_appliedMode >= 0 && g_appliedMode < kModeCount ? kModeNames[g_appliedMode] : "on",
              g_state.numFramesActuallyPresented);
     return buf;
@@ -1699,12 +1700,6 @@ void DrawFrameGenStatus() {
     ImGui::TextDisabled("Game frames %llu: with depth and motion %llu, with the picture before the HUD %llu",
                         static_cast<unsigned long long>(g_presents.load()), static_cast<unsigned long long>(g_tagged.load()),
                         static_cast<unsigned long long>(g_hudlessCount.load()));
-    ImGui::TextDisabled("HUD mask: %s (%llu frames)",
-                        g_uiCheck == UiCheck::usable     ? "used"
-                        : g_uiCheck == UiCheck::inverted ? "used (the game's alpha, flipped)"
-                        : g_uiCheck == UiCheck::unusable ? "not usable"
-                                                         : "checking",
-                        static_cast<unsigned long long>(g_uiCount.load()));
 }
 
 }  // namespace rd

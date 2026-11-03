@@ -645,61 +645,104 @@ void UpscalerPresent(swapchain* sc) {
     g_keyWasDown = down;
 }
 
-void UpscalerOverlay() {
-    bool changed = ImGui::Checkbox("Replace the game's FSR 2 (F9)", &g_set.enabled);
-    ImGui::TextDisabled("Turn FSR 2 on in the game; its quality sets the render size (Quality 67%%, Balanced 59%%,");
-    ImGui::TextDisabled("Performance 50%%, Ultra Performance 33%%). The game's sharpness setting still applies.");
-    const char* techs[] = {"Auto (DLSS on RTX, else FSR)", "DLSS", "FSR 3.1 / FSR 4"};
-    if (g_set.upscaler < 0 || g_set.upscaler > 2) g_set.upscaler = 0;
-    if (ImGui::Combo("Upscaler", &g_set.upscaler, techs, 3)) {
-        changed = true;
-        Log("Upscaler setting: %s", TechName(g_set.upscaler));
-    }
-    ImGui::TextDisabled("FSR: AMD's runtime picks FSR 4 on Radeon GPUs that support it, FSR 3.1 on the others.");
-    const char* presets[] = {"DLSS default", "J (transformer)", "K (transformer, recommended)"};
-    int idx = g_set.preset == 10 ? 1 : g_set.preset == 11 ? 2 : 0;
-    if (ImGui::Combo("DLSS model", &idx, presets, 3)) {
-        g_set.preset = idx == 1 ? 10 : idx == 2 ? 11 : 0;
-        changed = true;
-    }
-    changed |= ImGui::Checkbox("FSR: use the game's reactive mask", &g_set.fsrReactive);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The mask the game makes for its FSR 2 (particles, transparent effects):\n"
-                          "FSR 3.1 trusts the current frame more there. FSR 4 ignores it.");
-    if (ImGui::TreeNode("Testing")) {
-        changed |= ImGui::Checkbox("Flip jitter X", &g_set.flipJitterX);
-        ImGui::SameLine();
-        changed |= ImGui::Checkbox("Flip jitter Y", &g_set.flipJitterY);
-        ImGui::TreePop();
-    }
-    if (changed) SaveSettings();
+// The upscaler that runs with the current settings: DLSS or FSR (Auto resolves once DLSS was tried).
+Tech ResolvedTech() {
+    if (g_set.upscaler == static_cast<int>(Tech::Dlss)) return Tech::Dlss;
+    if (g_set.upscaler == static_cast<int>(Tech::Fsr)) return Tech::Fsr;
+    return g_active != Tech::Auto ? g_active : Tech::Dlss;
+}
+
+// One line for the top of the overlay: what upscales right now; *warn when it's a problem.
+std::string UpscalerHeadline(bool* warn) {
+    *warn = false;
     std::string err, mode;
     {
         std::lock_guard<std::mutex> lock(g_statusMutex);
         err = g_lastError;
         mode = g_mode;
     }
+    if (!g_set.enabled) return "Upscaling off (F9): the game's own FSR 2 upscales";
     const uint64_t presents = g_presents.load(), lastRun = g_lastRun.load();
-    if (!g_set.enabled)
-        ImGui::TextDisabled("Now running: the game's FSR 2 (upscaling off, F9)");
-    else if (lastRun && presents < lastRun + 30)
-        ImGui::Text("Now running: %s", mode.c_str());
-    else
-        ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1),
-                           "Now running: nothing to replace (the game isn't running FSR 2: turn it on, or leave the menu)");
-    ImGui::TextDisabled("DLSS: %s", dlss::Status().c_str());
-    ImGui::TextDisabled("FSR: %s", fsr::Status().c_str());
-    if (g_set.enabled && !err.empty()) ImGui::TextColored(kWarn, "%s", err.c_str());
+    if (lastRun && presents < lastRun + 30) return "Upscaling: " + mode;
+    *warn = true;
+    if (!err.empty()) return "Upscaling not running: " + err;
+    return "Upscaling waits for the game's FSR 2: turn it on in the graphics settings (menus don't use it)";
+}
 
-    DrawFrameGenSettings();
+void UpscalerOverlay() {
+    ImGui::TextDisabled(RD_PRODUCT " " RD_VERSION);
     bool warn = false;
+    const std::string up = UpscalerHeadline(&warn);
+    if (warn) ImGui::TextColored(kWarn, "%s", up.c_str());
+    else ImGui::TextUnformatted(up.c_str());
     const std::string fg = FrameGenHeadline(&warn);
     if (warn) ImGui::TextColored(kWarn, "%s", fg.c_str());
-    else ImGui::Text("%s", fg.c_str());
-    if (ImGui::TreeNode("Frame generation details")) {
-        DrawFrameGenStatus();
-        ImGui::TreePop();
+    else ImGui::TextUnformatted(fg.c_str());
+    ImGui::Spacing();
+
+    if (!ImGui::BeginTabBar("##re4dlss")) return;
+    bool changed = false;
+    if (ImGui::BeginTabItem("Settings")) {
+        ImGui::SeparatorText("Upscaling");
+        changed |= ImGui::Checkbox("Upscaling (F9)", &g_set.enabled);
+        Help("Puts DLSS or FSR 3/4 in place of the game's FSR 2. Turn FSR 2 on in the game's graphics settings: "
+             "its quality picks the render size (Quality 67%, Balanced 59%, Performance 50%, Ultra Performance "
+             "33%), and the game's Sharpness setting still applies.\n\nF9 switches it on and off.");
+        ImGui::BeginDisabled(!g_set.enabled);
+        const char* techs[] = {"Auto", "DLSS", "FSR 3.1 / FSR 4"};
+        if (g_set.upscaler < 0 || g_set.upscaler > 2) g_set.upscaler = 0;
+        ImGui::SetNextItemWidth(ControlWidth());
+        if (ImGui::Combo("Upscaler", &g_set.upscaler, techs, 3)) {
+            changed = true;
+            Log("Upscaler setting: %s", TechName(g_set.upscaler));
+        }
+        Help("Auto: DLSS on NVIDIA RTX cards, FSR on others.\nDLSS: NVIDIA DLSS Super Resolution (RTX cards).\n"
+             "FSR 3.1 / FSR 4: AMD's upscaler, any DirectX 12 card; AMD's runtime picks FSR 4 on Radeon cards that "
+             "support it.\n\nSwitches right away.");
+        if (ResolvedTech() == Tech::Dlss) {
+            const char* presets[] = {"NVIDIA's default", "J (transformer)", "K (transformer, recommended)"};
+            int idx = g_set.preset == 10 ? 1 : g_set.preset == 11 ? 2 : 0;
+            ImGui::SetNextItemWidth(ControlWidth());
+            if (ImGui::Combo("DLSS model", &idx, presets, 3)) {
+                g_set.preset = idx == 1 ? 10 : idx == 2 ? 11 : 0;
+                changed = true;
+            }
+            Help("Which DLSS model upscales. K is the newest transformer model. A DLSS override in the NVIDIA "
+                 "App takes precedence.");
+        }
+        ImGui::EndDisabled();
+        DrawFrameGenSettings();
+        ImGui::EndTabItem();
     }
+    if (ImGui::BeginTabItem("Status")) {
+        ImGui::SeparatorText("Upscaling");
+        ImGui::TextDisabled("DLSS: %s", dlss::Status().c_str());
+        ImGui::TextDisabled("FSR: %s", fsr::Status().c_str());
+        std::string err;
+        {
+            std::lock_guard<std::mutex> lock(g_statusMutex);
+            err = g_lastError;
+        }
+        if (g_set.enabled && !err.empty()) ImGui::TextColored(kWarn, "Last problem: %s", err.c_str());
+        DrawFrameGenStatus();
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Advanced")) {
+        ImGui::SeparatorText("Upscaling");
+        changed |= ImGui::Checkbox("FSR: use the game's reactive mask", &g_set.fsrReactive);
+        Help("The mask the game makes for its FSR 2 (particles, transparent effects): FSR 3.1 trusts the current "
+             "frame more there, against ghosting. FSR 4 ignores it.");
+        changed |= ImGui::Checkbox("Flip jitter X", &g_set.flipJitterX);
+        ImGui::SameLine();
+        changed |= ImGui::Checkbox("Flip jitter Y", &g_set.flipJitterY);
+        Help("Testing only: the sign of the camera jitter given to DLSS and FSR. Leave both off.");
+        DrawFrameGenAdvanced();
+        ImGui::SeparatorText("Development");
+        DrawCaptureTool();
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+    if (changed) SaveSettings();
 }
 
 void UpscalerInit() {

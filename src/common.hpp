@@ -48,6 +48,7 @@ void RegisterFrameGen();
 void UnregisterFrameGen();
 void DrawFrameGenSettings();
 void DrawFrameGenStatus();
+void DrawFrameGenAdvanced();  // DLSS-G object separation, FSR HUD protection
 std::string FrameGenHeadline(bool* warn);
 std::string FrameGenDiag();  // inputs tagged / frames without them since the last call, and why
 // True while frame generation wants each frame's camera (the upscaler then looks for SceneInfo).
@@ -73,5 +74,8 @@ bool UpscalerOnDraw(reshade::api::command_list* cl, uint32_t vertices, uint32_t 
 bool UpscalerOnDispatch(reshade::api::command_list* cl);  // true: dispatch replaced
 void UpscalerPresent(reshade::api::swapchain* sc);
 void UpscalerOverlay();
+
+// main.cpp: the frame capture tool (Advanced tab).
+void DrawCaptureTool();
 
 }  // namespace rd
