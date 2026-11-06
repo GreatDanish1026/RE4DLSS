@@ -73,6 +73,12 @@ if ($Install) {
     if (-not (Test-Path "$GameDir\re4.exe")) { throw "re4.exe not found in $GameDir (pass -GameDir)" }
     if (Get-Process re4 -ErrorAction SilentlyContinue) { throw "Close the game first." }
     Copy-Runtime $GameDir
+    if (Test-Path "$GameDir\reframework") {
+        New-Item -ItemType Directory -Force "$GameDir\reframework\autorun" | Out-Null
+        Copy-Item "$root\reframework\RE4DLSS.lua" "$GameDir\reframework\autorun" -Force
+    } else {
+        Write-Warning "REFramework isn't installed: the render resolution dropdown needs it."
+    }
     Write-Host "Installed to $GameDir"
 }
 
@@ -85,6 +91,8 @@ if ($Package) {
 
     # Files installed into the game folder (where re4.exe is).
     Copy-Runtime $mod
+    New-Item -ItemType Directory -Force "$mod\reframework\autorun" | Out-Null
+    Copy-Item "$root\reframework\RE4DLSS.lua" "$mod\reframework\autorun"
     Copy-Item "$root\README.md" "$mod\RE4DLSS-README.md"
     Copy-Item "$root\THIRD_PARTY_NOTICES.txt" "$mod\RE4DLSS-THIRD_PARTY_NOTICES.txt"
     Copy-Item "$root\LICENSE" "$mod\RE4DLSS-licenses\RE4DLSS-LICENSE.txt"
@@ -98,7 +106,7 @@ if ($Package) {
     @(
         "name=RE4DLSS - DLSS, FSR 3/4 and frame generation for Resident Evil 4",
         "version=v$version",
-        "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler, and adds DLSS or FSR frame generation: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. DLSS needs an NVIDIA RTX card (frame generation RTX 40/50); FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
+        "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler, and adds DLSS or FSR frame generation: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. With REFramework, the overlay's render resolution adds Native (100%): DLAA, or FSR native anti-aliasing. DLSS needs an NVIDIA RTX card (frame generation RTX 40/50); FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
         "author=Scott Dinwiddie"
     ) | Set-Content "$mod\modinfo.ini" -Encoding ascii
 

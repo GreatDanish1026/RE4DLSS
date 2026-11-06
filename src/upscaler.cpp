@@ -80,10 +80,25 @@ struct Settings {
     bool fsrReactive = true;  // give FSR 3/4 the game's FSR 2 reactive mask
     int preset = dlss::kPresetAuto;  // DLSS model: Automatic, or NVSDK_NGX_DLSS_Hint_Render_Preset_* (0 = NVIDIA's)
     bool flipJitterX = false, flipJitterY = false;  // testing: jitter sign
+    int resolution = 0;   // kResolutions: 0 = the game's FSR 2 setting (RE4DLSS.lua sets the others)
 } g_set;
+
+// Render resolutions offered: the engine's FSR 2 quality (via.render.UpscalingInterface
+// UpscalingQuality, set by reframework/autorun/RE4DLSS.lua): 0 native, 1 Quality, 2 Balanced,
+// 3 Performance, 4 Ultra Performance. -1: the game's own setting.
+struct Resolution {
+    const char* name;
+    int quality;
+};
+const Resolution kResolutions[] = {{"Game's FSR 2 setting", -1},          {"Native (100%): DLAA / FSR native AA", 0},
+                                   {"Quality (67%)", 1},                  {"Balanced (59%)", 2},
+                                   {"Performance (50%)", 3},              {"Ultra Performance (33%)", 4}};
+constexpr int kResolutionCount = sizeof(kResolutions) / sizeof(kResolutions[0]);
 
 void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "Enabled", g_set.enabled);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "RenderResolution", g_set.resolution);
+    if (g_set.resolution < 0 || g_set.resolution >= kResolutionCount) g_set.resolution = 0;
     reshade::get_config_value(nullptr, RD_PRODUCT, "DlssModel", g_set.preset);
     reshade::get_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
@@ -93,6 +108,7 @@ void LoadSettings() {
 
 void SaveSettings() {
     reshade::set_config_value(nullptr, RD_PRODUCT, "Enabled", g_set.enabled);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "RenderResolution", g_set.resolution);
     reshade::set_config_value(nullptr, RD_PRODUCT, "DlssModel", g_set.preset);
     reshade::set_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
@@ -619,7 +635,59 @@ bool UpscalerOnDispatch(command_list* cl) {
     }
 }
 
+namespace {
+
+// The render resolution for RE4DLSS.lua: the wanted FSR 2 quality (-1 = the game's) in
+// reframework/data/RE4DLSS_mode.txt; the script reports the current one in RE4DLSS_status.txt.
+std::wstring DataDir() { return ExeDir() + L"reframework\\data\\"; }
+
+int WantedQuality() { return g_set.enabled ? kResolutions[g_set.resolution].quality : -1; }
+
+int g_writtenQuality = -2;
+
+void WriteWantedQuality() {
+    const int want = WantedQuality();
+    if (want == g_writtenQuality) return;
+    if (GetFileAttributesW((ExeDir() + L"reframework").c_str()) == INVALID_FILE_ATTRIBUTES) return;  // no REFramework
+    CreateDirectoryW(DataDir().c_str(), nullptr);
+    if (FILE* f = _wfopen((DataDir() + L"RE4DLSS_mode.txt").c_str(), L"w")) {
+        fprintf(f, "%d\n", want);
+        fclose(f);
+        g_writtenQuality = want;
+        Log("render resolution for RE4DLSS.lua: %s", want >= 0 ? kResolutions[g_set.resolution].name : "the game's FSR 2 setting");
+    }
+}
+
+// The script's last report (the engine's FSR 2 quality now), if it's recent (the script runs).
+bool ScriptStatus(int* quality) {
+    const std::wstring path = DataDir() + L"RE4DLSS_status.txt";
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a)) return false;
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    const uint64_t t = (uint64_t(a.ftLastWriteTime.dwHighDateTime) << 32) | a.ftLastWriteTime.dwLowDateTime;
+    const uint64_t n = (uint64_t(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    if (n > t && n - t > 50000000ull) return false;  // older than 5 s
+    FILE* f = _wfopen(path.c_str(), L"r");
+    if (!f) return false;
+    int v = -1;
+    const int got = fscanf(f, "%d", &v);
+    fclose(f);
+    if (got != 1) return false;
+    *quality = v;
+    return true;
+}
+
+const char* QualityName(int q) {
+    for (const Resolution& r : kResolutions)
+        if (r.quality == q && q >= 0) return r.name;
+    return "?";
+}
+
+}  // namespace
+
 void UpscalerPresent(swapchain* sc) {
+    WriteWantedQuality();
     dlss::EndFrame();
     fsr::EndFrame();
     ++g_presents;
@@ -697,8 +765,8 @@ void UpscalerOverlay() {
         ImGui::SeparatorText("Upscaling");
         changed |= ImGui::Checkbox("Upscaling (F9)", &g_set.enabled);
         Help("Puts DLSS or FSR 3/4 in place of the game's FSR 2. Turn FSR 2 on in the game's graphics settings: "
-             "its quality picks the render size (Quality 67%, Balanced 59%, Performance 50%, Ultra Performance "
-             "33%), and the game's Sharpness setting still applies.\n\nF9 switches it on and off.");
+             "its quality picks the render size unless Render resolution below picks one, and the game's "
+             "Sharpness setting still applies.\n\nF9 switches it on and off.");
         ImGui::BeginDisabled(!g_set.enabled);
         const char* techs[] = {"Auto", "DLSS", "FSR 3.1 / FSR 4"};
         if (g_set.upscaler < 0 || g_set.upscaler > 2) g_set.upscaler = 0;
@@ -710,6 +778,25 @@ void UpscalerOverlay() {
         Help("Auto: DLSS on NVIDIA RTX cards, FSR on others.\nDLSS: NVIDIA DLSS Super Resolution (RTX cards).\n"
              "FSR 3.1 / FSR 4: AMD's upscaler, any DirectX 12 card; AMD's runtime picks FSR 4 on Radeon cards that "
              "support it.\n\nSwitches right away.");
+        ImGui::SetNextItemWidth(ControlWidth());
+        static const char* const resNames[] = {kResolutions[0].name, kResolutions[1].name, kResolutions[2].name,
+                                               kResolutions[3].name, kResolutions[4].name, kResolutions[5].name};
+        static_assert(sizeof(resNames) / sizeof(resNames[0]) == kResolutionCount);
+        if (ImGui::Combo("Render resolution", &g_set.resolution, resNames, kResolutionCount)) {
+            changed = true;
+            Log("Render resolution setting: %s", kResolutions[g_set.resolution].name);
+        }
+        Help("The size the game renders at before upscaling. Native (100%) isn't in the game's menu: DLSS then "
+             "runs as DLAA, FSR as native anti-aliasing. The others match the game's FSR 2 qualities. \"Game's "
+             "FSR 2 setting\" leaves it to the menu.\n\nNeeds REFramework (the bundled RE4DLSS.lua sets it) and "
+             "the game's FSR 2 on. Switches right away.");
+        if (g_set.resolution > 0) {
+            int q = -1;
+            if (ScriptStatus(&q))
+                ImGui::TextDisabled("Game's FSR 2 now: %s", q == kResolutions[g_set.resolution].quality ? "as chosen" : QualityName(q));
+            else
+                ImGui::TextColored(kWarn, "RE4DLSS.lua isn't running: is REFramework installed?");
+        }
         if (ResolvedTech() == Tech::Dlss) {
             int model = ModelIndex(g_set.preset);
             ImGui::SetNextItemWidth(ControlWidth());
