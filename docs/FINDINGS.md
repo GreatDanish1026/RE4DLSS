@@ -46,3 +46,13 @@ history (FSR alternates its accumulate output texture). Render size = the game's
 
 Confirmed by the user (2026-11-02): looks good. Log: DLSS ran at every FSR 2 quality, 2560x1440,
 2258x1270, 1920x1080 and 1280x720 -> 3840x2160, no fallbacks, default jitter sign.
+
+## Render size and DLAA (REFramework probes, 2026-11-06)
+
+`via.render.UpscalingInterface` (native singleton) has `get_UpscalingQuality` /
+`set_UpscalingQuality` (UInt32): FSR 2's quality. At 3840x2160: 0 = native (3840x2160 ->
+3840x2160, so DLSS runs as DLAA), 1 = Quality (2560x1440), 2 = Balanced (2258x1270); 3 and 4 are
+Performance and Ultra Performance; 5-7 change nothing. Setting it takes effect at once.
+`RenderConfig.ImageQualityRate` is ignored while FSR 2 is on. `reframework/RE4DLSS.lua` applies the
+value the add-on writes to `reframework/data/RE4DLSS_mode.txt` (-1 = the game's own) and reports
+the current one in `RE4DLSS_status.txt`.
