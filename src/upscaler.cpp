@@ -797,19 +797,24 @@ void UpscalerOverlay() {
             else
                 ImGui::TextColored(kWarn, "RE4DLSS.lua isn't running: is REFramework installed?");
         }
-        if (ResolvedTech() == Tech::Dlss) {
+        {
+            // Always shown (greyed out while FSR upscales) so it's easy to find.
+            const bool fsrRuns = ResolvedTech() == Tech::Fsr;
+            ImGui::BeginDisabled(fsrRuns);
             int model = ModelIndex(g_set.preset);
             ImGui::SetNextItemWidth(ControlWidth());
             if (ImGui::Combo("DLSS model", &model, kModelNames, kModelCount)) {
                 g_set.preset = kModelIds[model];
                 changed = true;
+                Log("DLSS model setting: %s", kModelNames[model]);
             }
+            ImGui::EndDisabled();
             Help("Which DLSS model upscales. Automatic follows NVIDIA's recommendation for the render "
                  "resolution: K from 100% down to Balanced, M at Performance (50%), L at Ultra "
                  "Performance (33%). K, J, L or M use that model at every resolution; L and M (DLSS 4.5's "
                  "second-generation transformer) cost more, especially on RTX 20 and 30 cards. NVIDIA's "
                  "default leaves it to the driver. A DLSS override set in the NVIDIA App takes "
-                 "precedence.");
+                 "precedence.\n\nOnly used when DLSS upscales (greyed out while FSR does).");
         }
         ImGui::EndDisabled();
         DrawFrameGenSettings();
