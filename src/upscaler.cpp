@@ -199,6 +199,114 @@ StageState* Stage(ListState* s, shader_stage stages) {
 
 void OnInitList(command_list* cl) { cl->create_private_data<ListState>(); }
 
+// ---------------------------------------------------------------- reading constant buffers
+//
+// Constant buffers are read on the CPU when the pass is recorded. Usually they're in upload memory
+// and can be mapped. Some systems (seen on a Radeon with FSR 4) keep them in GPU-only memory,
+// filled by a copy from upload memory: once that's seen, buffer copies are noted, and such a
+// buffer is read from the upload buffer it was copied from.
+
+std::atomic<bool> g_trackCopies{false};
+struct CopySource {
+    uint64_t size;
+    resource src;
+    uint64_t srcOffset;
+};
+std::mutex g_copyMutex;
+std::map<uint64_t, std::map<uint64_t, CopySource>> g_copies;  // destination buffer -> its offset -> source
+std::map<uint64_t, bool> g_copySources;                        // the source buffers seen
+size_t g_copyCount = 0;
+
+void NoteCopy(resource src, uint64_t srcOffset, resource dst, uint64_t dstOffset, uint64_t size) {
+    std::lock_guard<std::mutex> lock(g_copyMutex);
+    if (g_copyCount > 65536) {
+        g_copies.clear();
+        g_copySources.clear();
+        g_copyCount = 0;
+    }
+    if (g_copies[dst.handle].insert_or_assign(dstOffset, CopySource{size, src, srcOffset}).second) ++g_copyCount;
+    g_copySources[src.handle] = true;
+}
+
+bool OnCopyBuffer(command_list*, resource src, uint64_t srcOffset, resource dst, uint64_t dstOffset, uint64_t size) {
+    if (g_trackCopies.load(std::memory_order_relaxed)) NoteCopy(src, srcOffset, dst, dstOffset, size);
+    return false;
+}
+
+// A destroyed buffer mustn't be mapped later: forget copies into it, and all of them if it was a source.
+void OnDestroyBuffer(device*, resource r) {
+    if (!g_trackCopies.load(std::memory_order_relaxed)) return;
+    std::lock_guard<std::mutex> lock(g_copyMutex);
+    if (g_copySources.count(r.handle)) {
+        g_copies.clear();
+        g_copySources.clear();
+        g_copyCount = 0;
+    } else if (auto it = g_copies.find(r.handle); it != g_copies.end()) {
+        g_copyCount -= it->second.size();
+        g_copies.erase(it);
+    }
+}
+
+bool CopySourceOf(const buffer_range& r, uint64_t bytes, resource* src, uint64_t* srcOffset) {
+    std::lock_guard<std::mutex> lock(g_copyMutex);
+    const auto b = g_copies.find(r.buffer.handle);
+    if (b == g_copies.end()) return false;
+    auto it = b->second.upper_bound(r.offset);
+    if (it == b->second.begin()) return false;
+    --it;
+    const uint64_t end = it->second.size == UINT64_MAX ? UINT64_MAX : it->first + it->second.size;
+    if (r.offset + bytes > end) return false;
+    *src = it->second.src;
+    *srcOffset = it->second.srcOffset + (r.offset - it->first);
+    return true;
+}
+
+// Reads `bytes` of a buffer: mapped when the CPU can, else through the copy that filled it.
+// *how says which (or why neither worked).
+bool ReadBuffer(device* dev, const buffer_range& r, uint32_t bytes, void* out, std::string* how) {
+    const resource_desc d = dev->get_resource_desc(r.buffer);
+    char msg[200];
+    void* data = nullptr;
+    if (d.heap != memory_heap::default_ && dev->map_buffer_region(r.buffer, r.offset, bytes, map_access::read_only, &data) && data) {
+        memcpy(out, data, bytes);
+        dev->unmap_buffer_region(r.buffer);
+        if (how) {
+            snprintf(msg, sizeof(msg), "mapped (memory heap %d)", static_cast<int>(d.heap));
+            *how = msg;
+        }
+        return true;
+    }
+    g_trackCopies = true;
+    resource src = {0};
+    uint64_t srcOffset = 0;
+    if (CopySourceOf(r, bytes, &src, &srcOffset)) {
+        const resource_desc sd = dev->get_resource_desc(src);
+        data = nullptr;
+        if (sd.heap != memory_heap::default_ && dev->map_buffer_region(src, srcOffset, bytes, map_access::read_only, &data) && data) {
+            memcpy(out, data, bytes);
+            dev->unmap_buffer_region(src);
+            if (how) {
+                snprintf(msg, sizeof(msg), "memory heap %d, read from the buffer copied into it (heap %d)",
+                         static_cast<int>(d.heap), static_cast<int>(sd.heap));
+                *how = msg;
+            }
+            return true;
+        }
+        if (how) {
+            snprintf(msg, sizeof(msg), "memory heap %d can't be read, nor the buffer copied into it (heap %d)",
+                     static_cast<int>(d.heap), static_cast<int>(sd.heap));
+            *how = msg;
+        }
+        return false;
+    }
+    if (how) {
+        snprintf(msg, sizeof(msg), "memory heap %d (buffer size %llu) can't be read, and no copy into it was seen",
+                 static_cast<int>(d.heap), static_cast<unsigned long long>(d.buffer.size));
+        *how = msg;
+    }
+    return false;
+}
+
 void OnBindRts(command_list* cl, uint32_t count, const resource_view* rtvs, resource_view) {
     if (ListState* s = State(cl)) s->rtv = count ? rtvs[0] : resource_view{0};
 }
@@ -208,6 +316,10 @@ bool OnCopy(command_list* cl, resource src, resource dst) {
     if (!s) return false;
     device* dev = cl->get_device();
     const resource_desc a = dev->get_resource_desc(src), b = dev->get_resource_desc(dst);
+    if (a.type == resource_type::buffer && b.type == resource_type::buffer) {
+        if (g_trackCopies.load(std::memory_order_relaxed)) NoteCopy(src, 0, dst, 0, b.buffer.size);
+        return false;
+    }
     if (a.type == resource_type::texture_2d && b.type == resource_type::texture_2d && a.texture.width == b.texture.width &&
         a.texture.height == b.texture.height && a.texture.format == b.texture.format &&
         a.texture.format == format::r16g16b16a16_float) {
@@ -243,12 +355,12 @@ void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
     s.checked[s.checkedNext++ % 8] = r;
     device* dev = cl->get_device();
     const resource_desc d = dev->get_resource_desc(r.buffer);
-    // SceneInfo is written by the CPU every frame (upload memory); GPU-only buffers can't be read.
-    if (d.type != resource_type::buffer || d.heap == memory_heap::default_ || r.offset + kSceneInfoBytes > d.buffer.size)
-        return;
-    void* data = nullptr;
-    if (!dev->map_buffer_region(r.buffer, r.offset, kSceneInfoBytes, map_access::read_only, &data) || !data) return;
-    const float* f = static_cast<const float*>(data);
+    // SceneInfo is written by the CPU every frame: upload memory, or GPU-only memory filled by a copy
+    // (read through it, once such buffers were seen).
+    if (d.type != resource_type::buffer || r.offset + kSceneInfoBytes > d.buffer.size) return;
+    if (d.heap == memory_heap::default_ && !g_trackCopies.load(std::memory_order_relaxed)) return;
+    float f[kSceneInfoBytes / 4];
+    if (!ReadBuffer(dev, r, kSceneInfoBytes, f, nullptr)) return;
     // Right size, a view-projection matrix, unit view axes (transposeViewInvMat, floats 28-39) and
     // a near plane: another buffer with the same screen size but zero matrices exists too.
     const auto axis = [&](int c) { return f[28 + c] * f[28 + c] + f[32 + c] * f[32 + c] + f[36 + c] * f[36 + c]; };
@@ -259,12 +371,9 @@ void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
                        // projection x scale (view x axis . viewProj column 0) positive: not the mirrored
                        // second view the game also draws at this size
                        f[28] * f[0] + f[32] * f[4] + f[36] * f[8] > 0.05f;
-    if (match) {
-        memcpy(s.scene, f, kSceneInfoBytes);
-        s.sceneValid = true;
-    }
-    dev->unmap_buffer_region(r.buffer);
     if (!match) return;
+    memcpy(s.scene, f, kSceneInfoBytes);
+    s.sceneValid = true;
     std::lock_guard<std::mutex> lock(g_sceneMutex);
     memcpy(g_lastScene, s.scene, kSceneInfoBytes);
     g_lastSceneValid = true;
@@ -376,23 +485,59 @@ resource ComputeView(device* dev, const StageState& st, uint32_t reg, bool uav) 
     return {0};
 }
 
-// cbFSR2: the compute root CBV b0 space0.
-bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out) {
+// cbFSR2: compute b0 space0. In RE4 a root CBV; a descriptor table entry or root constants are
+// read too. *how says where it came from, or why it couldn't be read.
+bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::string* how) {
     descriptor_tracking* dt = dev->get_private_data<descriptor_tracking>();
-    if (!dt) return false;
+    if (!dt) {
+        *how = "descriptor tracking unavailable";
+        return false;
+    }
+    std::string sub;
     for (const auto& [param, r] : st.roots) {
         if (r.type != descriptor_type::constant_buffer) continue;
         const pipeline_layout_param p = dt->get_pipeline_layout_param(st.layout, param);
         if (p.type != pipeline_layout_param_type::push_descriptors || p.push_descriptors.dx_register_index != 0 ||
             p.push_descriptors.dx_register_space != 0)
             continue;
-        void* data = nullptr;
-        if (!dev->map_buffer_region(r.range.buffer, r.range.offset, kCbWords * 4, map_access::read_only, &data) || !data)
-            return false;
-        memcpy(out, data, kCbWords * 4);
-        dev->unmap_buffer_region(r.range.buffer);
+        const bool ok = ReadBuffer(dev, r.range, kCbWords * 4, out, &sub);
+        *how = "root CBV, " + sub;
+        return ok;
+    }
+    for (uint32_t i = 0; i < st.tables.size(); ++i) {
+        if (!st.tables[i].handle) continue;
+        const pipeline_layout_param p = dt->get_pipeline_layout_param(st.layout, i);
+        if (p.type != pipeline_layout_param_type::descriptor_table || !p.descriptor_table.ranges) continue;
+        for (uint32_t k = 0; k < p.descriptor_table.count; ++k) {
+            const descriptor_range& range = p.descriptor_table.ranges[k];
+            if (range.type != descriptor_type::constant_buffer || range.dx_register_space != 0 || range.dx_register_index != 0)
+                continue;
+            descriptor_heap heap = {0};
+            uint32_t offset = 0;
+            dev->get_descriptor_heap_offset(st.tables[i], range.binding, 0, &heap, &offset);
+            const buffer_range br = dt->get_buffer_range(heap, offset);
+            if (!br.buffer.handle) {
+                *how = "descriptor table CBV, buffer unknown";
+                return false;
+            }
+            const bool ok = ReadBuffer(dev, br, kCbWords * 4, out, &sub);
+            *how = "descriptor table CBV, " + sub;
+            return ok;
+        }
+    }
+    for (const auto& [param, c] : st.constants) {
+        const pipeline_layout_param p = dt->get_pipeline_layout_param(st.layout, param);
+        if (p.type != pipeline_layout_param_type::push_constants || p.push_constants.dx_register_index != 0 ||
+            p.push_constants.dx_register_space != 0 || c.values.size() < static_cast<size_t>(kCbWords))
+            continue;
+        memcpy(out, c.values.data(), kCbWords * 4);
+        *how = "root constants";
         return true;
     }
+    char msg[160];
+    snprintf(msg, sizeof(msg), "no b0 constant buffer bound (%zu root descriptors, %zu tables, %zu root constants)",
+             st.roots.size(), st.tables.size(), st.constants.size());
+    *how = msg;
     return false;
 }
 
@@ -407,9 +552,18 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         return false;
     }
     uint32_t cb[kCbWords];
-    if (!ReadFsrConstants(dev, s.compute, cb)) {
-        Fail("FSR 2 constants not found: FSR 2 kept");
+    std::string how;
+    if (!ReadFsrConstants(dev, s.compute, cb, &how)) {
+        Fail("FSR 2 constants not readable (" + how + "): FSR 2 kept");
         return false;
+    }
+    {
+        static std::string lastHow;  // where cbFSR2 comes from, logged when it changes
+        std::lock_guard<std::mutex> lock(g_statusMutex);
+        if (how != lastHow) {
+            Log("FSR 2 constants: %s", how.c_str());
+            lastHow = how;
+        }
     }
     float f[kCbWords];
     memcpy(f, cb, sizeof(f));
@@ -561,7 +715,8 @@ void GiveFrameGen(command_list* cl, ListState& s) {
     if (!FrameGenWantsCamera() || !s.chain.depth.handle || !s.chain.motion.handle) return;
     device* dev = cl->get_device();
     uint32_t cb[kCbWords];
-    if (!ReadFsrConstants(dev, s.compute, cb)) return;
+    std::string how;
+    if (!ReadFsrConstants(dev, s.compute, cb, &how)) return;
     float f[kCbWords];
     memcpy(f, cb, sizeof(f));
     const uint32_t rw = cb[kRenderSize], rh = cb[kRenderSize + 1];
@@ -863,6 +1018,8 @@ void UpscalerInit() {
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
     reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&OnBindRts);
     reshade::register_event<reshade::addon_event::copy_resource>(&OnCopy);
+    reshade::register_event<reshade::addon_event::copy_buffer_region>(&OnCopyBuffer);
+    reshade::register_event<reshade::addon_event::destroy_resource>(&OnDestroyBuffer);
     reshade::register_event<reshade::addon_event::barrier>(&OnBarrier);
     RegisterFrameGen();
     Log("Upscaling %s at start (F9 toggles), upscaler setting %d (0 auto, 1 DLSS, 2 FSR)", g_set.enabled ? "on" : "off",
@@ -880,6 +1037,8 @@ void UpscalerShutdown() {
     reshade::unregister_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
     reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&OnBindRts);
     reshade::unregister_event<reshade::addon_event::copy_resource>(&OnCopy);
+    reshade::unregister_event<reshade::addon_event::copy_buffer_region>(&OnCopyBuffer);
+    reshade::unregister_event<reshade::addon_event::destroy_resource>(&OnDestroyBuffer);
     reshade::unregister_event<reshade::addon_event::barrier>(&OnBarrier);
     UnregisterFrameGen();
 }
