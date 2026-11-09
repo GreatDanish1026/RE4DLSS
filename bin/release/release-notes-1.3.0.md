@@ -7,3 +7,5 @@
 **Install**: replace the previous version with `RE4DLSS-1.3.0.zip` in Fluffy Mod Manager (or copy its files over the old ones). New file: `nvngx_dlssd.dll` (NVIDIA's Ray Reconstruction runtime 310.9.16, signed), next to `re4.exe` and in `streamline\`. FSR 2 must be on in the game's settings, as before.
 
 Tested at 3840x2160, Quality and Ultra Performance, with ray tracing on, on an RTX 5080.
+
+**Known issue**: users report visual problems with the biosensor scope while the add-on is on; a fix is planned for 1.3.1.
