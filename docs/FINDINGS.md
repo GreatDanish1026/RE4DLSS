@@ -75,12 +75,15 @@ of RE2/RE3/RE7's chain (RE2DLSS `docs/FINDINGS.md` "Ray tracing chain"), at 1920
 
 The Ray Reconstruction section of `src/upscaler.cpp` is RE7DLSS's, with one signal. At FSR 2's
 accumulate, the guides are made from rayTracingUpscale's G-buffer, FSR 2's translated depth (r32f,
-reverse-Z) and SceneInfo (also looked for while RR is on, not only for frame generation), and
-DLSS-D runs in place of DLSS (with FSR 2's pre-exposure). RR is kept while rayTracingUpscale ran
-in the last 60 frames. Some frames' SceneInfo match is another view (not a perspective camera):
-then the last good camera is used for up to 60 frames; without that RR flipped to Super
-Resolution about twice a second.
+reverse-Z) and the camera, and DLSS-D runs in place of DLSS (with FSR 2's pre-exposure). RR is
+kept while rayTracingUpscale ran in the last 60 frames.
+
+Camera: SceneInfo is rayTracingUpscale's root CBV b0, read there once a frame. A first build used
+frame generation's SceneInfo search instead (it reads back every constant buffer the game binds
+until one matches): that made the game CPU-bound (big fps drop, GPU not fully used) and matched
+another view on some frames, flipping RR to Super Resolution about twice a second. If a frame's
+camera isn't usable, the last good one is used for up to 60 frames.
 
 Test (2026-11-09, 4K, ray tracing on): RR at Quality (2560x1440 and 2258x1270) and Ultra
-Performance (1280x720), steady once the camera fallback was in, on/off switching clean; Super
+Performance (1280x720), steady, GPU fully used with RR on (fps fine), on/off switching clean; Super
 Resolution while the game doesn't ray trace (a cutscene or menu stretch).

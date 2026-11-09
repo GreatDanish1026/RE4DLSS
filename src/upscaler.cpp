@@ -440,7 +440,7 @@ void OnPushDescriptors(command_list* cl, shader_stage stages, pipeline_layout la
     if (u.type == descriptor_type::constant_buffer || u.type == descriptor_type::buffer_shader_resource_view ||
         u.type == descriptor_type::buffer_unordered_access_view)
         st->roots[param] = {stages, u.type, *static_cast<const buffer_range*>(u.descriptors)};
-    if (u.type == descriptor_type::constant_buffer && (FrameGenWantsCamera() || (g_set.rr && g_set.enabled)))
+    if (u.type == descriptor_type::constant_buffer && FrameGenWantsCamera())
         CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
 }
 
@@ -513,7 +513,9 @@ resource ComputeView(device* dev, const StageState& st, uint32_t reg, bool uav) 
 
 // cbFSR2: compute b0 space0. In RE4 a root CBV; a descriptor table entry or root constants are
 // read too. *how says where it came from, or why it couldn't be read.
-bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::string* how) {
+// The compute stage's b0 space0 constant buffer, <bytes> of it (a root CBV, a descriptor table
+// entry or root constants).
+bool ReadCb0(device* dev, const StageState& st, uint32_t bytes, void* out, std::string* how) {
     descriptor_tracking* dt = dev->get_private_data<descriptor_tracking>();
     if (!dt) {
         *how = "descriptor tracking unavailable";
@@ -526,7 +528,7 @@ bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::str
         if (p.type != pipeline_layout_param_type::push_descriptors || p.push_descriptors.dx_register_index != 0 ||
             p.push_descriptors.dx_register_space != 0)
             continue;
-        const bool ok = ReadBuffer(dev, r.range, kCbWords * 4, out, &sub);
+        const bool ok = ReadBuffer(dev, r.range, bytes, out, &sub);
         *how = "root CBV, " + sub;
         return ok;
     }
@@ -546,7 +548,7 @@ bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::str
                 *how = "descriptor table CBV, buffer unknown";
                 return false;
             }
-            const bool ok = ReadBuffer(dev, br, kCbWords * 4, out, &sub);
+            const bool ok = ReadBuffer(dev, br, bytes, out, &sub);
             *how = "descriptor table CBV, " + sub;
             return ok;
         }
@@ -554,9 +556,9 @@ bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::str
     for (const auto& [param, c] : st.constants) {
         const pipeline_layout_param p = dt->get_pipeline_layout_param(st.layout, param);
         if (p.type != pipeline_layout_param_type::push_constants || p.push_constants.dx_register_index != 0 ||
-            p.push_constants.dx_register_space != 0 || c.values.size() < static_cast<size_t>(kCbWords))
+            p.push_constants.dx_register_space != 0 || c.values.size() * 4 < bytes)
             continue;
-        memcpy(out, c.values.data(), kCbWords * 4);
+        memcpy(out, c.values.data(), bytes);
         *how = "root constants";
         return true;
     }
@@ -565,6 +567,10 @@ bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::str
              st.roots.size(), st.tables.size(), st.constants.size());
     *how = msg;
     return false;
+}
+
+bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::string* how) {
+    return ReadCb0(dev, st, kCbWords * 4, out, how);
 }
 
 // ---------------------------------------------------------------- Ray Reconstruction
@@ -608,6 +614,9 @@ struct RtState {
     resource signal[4] = {};            // shY, cocg, specular, VFX specular: what replaces the denoised ones
     uint64_t upscaleFrame = UINT64_MAX;  // present count when rayTracingUpscale ran
     resource base = {0}, normal = {0};   // its G-buffer
+    float scene[kSceneInfoBytes / 4];    // its camera (SceneInfo, b0), read once a frame there
+    uint64_t sceneFrame = UINT64_MAX;    // present count when that was read
+    std::string sceneHow;                // why it couldn't be read, if it couldn't
     uint64_t rrFrame = UINT64_MAX;       // present count when Ray Reconstruction last ran
     uint64_t rrFrames = 0, skipped = 0, copied = 0;
     std::string error;                   // why Ray Reconstruction isn't running (overlay)
@@ -628,6 +637,7 @@ void RtWatch(resource r) {
 }
 
 void RtOnBarrier(uint32_t count, const resource* res, const resource_usage* after) {
+    if (!g_set.rr || !g_set.enabled) return;  // every barrier the game records comes here
     std::lock_guard<std::mutex> lock(g_rtMutex);
     if (g_rt.states.empty()) return;
     for (uint32_t i = 0; i < count; ++i) {
@@ -748,6 +758,17 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
         g_rt.upscaleFrame = frame;
         g_rt.base = ComputeView(dev, s.compute, kUpBase, false);
         g_rt.normal = ComputeView(dev, s.compute, kUpNormal, false);
+        // The camera the ray tracing used: SceneInfo is this pass's b0 (one small read a frame,
+        // instead of looking through the constant buffers the game binds).
+        if (g_rt.sceneFrame != frame) {
+            std::string how;
+            if (ReadCb0(dev, s.compute, kSceneInfoBytes, g_rt.scene, &how)) {
+                g_rt.sceneFrame = frame;
+            } else if (how != g_rt.sceneHow) {
+                Log("Ray Reconstruction: camera (SceneInfo) not readable: %s", how.c_str());
+                g_rt.sceneHow = how;
+            }
+        }
         if (skipping && g_rt.signalFrame == frame) {
             int copied = 0;
             for (uint32_t i = 0; i < kRtSignals; ++i) {
@@ -1144,26 +1165,16 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         in.key = reinterpret_cast<const void*>(1);  // one history: FSR alternates its accumulate output
         // Ray Reconstruction while the game ray traces (rayTracingUpscale ran in the last second or
         // so, so a skipped frame doesn't switch DLSS features and restart their history).
-        g_sceneW = renderW, g_sceneH = renderH;  // what SceneInfo must say (also looked for with RR on)
-        float scene[kSceneInfoBytes / 4];
-        bool sceneOk = false;
-        if (s.sceneValid) {
-            memcpy(scene, s.scene, sizeof(scene));
-            sceneOk = true;
-        } else {
-            std::lock_guard<std::mutex> lock(g_sceneMutex);
-            if (g_lastSceneValid && g_lastScene[kScreenSizeFloat] == static_cast<float>(renderW) &&
-                g_lastScene[kScreenSizeFloat + 1] == static_cast<float>(renderH)) {
-                memcpy(scene, g_lastScene, sizeof(scene));
-                sceneOk = true;
-            }
-        }
+        // The camera: the SceneInfo rayTracingUpscale read this frame.
         std::lock_guard<std::mutex> rtLock(g_rtMutex);
         static float worldToView[16], viewToClip[16];
         constexpr uint64_t kRtGraceFrames = 60;
         const uint64_t frame = g_presents.load();
-        // The SceneInfo found on some frames is another view of the same size (not a perspective
-        // camera): then the last good camera is used, for up to kRtGraceFrames.
+        float scene[kSceneInfoBytes / 4];
+        const bool sceneOk = g_rt.sceneFrame == frame;
+        if (sceneOk) memcpy(scene, g_rt.scene, sizeof(scene));
+        // If this frame's camera isn't usable (or wasn't read), the last good one is used for up to
+        // kRtGraceFrames.
         static float goodScene[kSceneInfoBytes / 4];
         static uint64_t goodFrame = UINT64_MAX, borrowed = 0;
         bool cameraOk = false;
