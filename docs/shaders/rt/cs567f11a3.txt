@@ -1,0 +1,305 @@
+;
+; Note: shader requires additional functionality:
+;       Use native low precision
+;
+;
+; Input signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+;
+; Output signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+; shader debug name: 74178be00452a153f94b0f41a1739f72.pdb
+; shader hash: 74178be00452a153f94b0f41a1739f72
+;
+; Pipeline Runtime Information: 
+;
+;PSVRuntimeInfo:
+; Compute Shader
+; NumThreads=(32,32,1)
+; MinimumExpectedWaveLaneCount: 0
+; MaximumExpectedWaveLaneCount: 4294967295
+; UsesViewID: false
+; SigInputElements: 0
+; SigOutputElements: 0
+; SigPatchConstOrPrimElements: 0
+; SigInputVectors: 0
+; SigOutputVectors[0]: 0
+; SigOutputVectors[1]: 0
+; SigOutputVectors[2]: 0
+; SigOutputVectors[3]: 0
+;
+;
+; Buffer Definitions:
+;
+; cbuffer RayTracingDenoiserConstantBufferInfo
+; {
+;
+;   struct RayTracingDenoiserConstantBufferInfo
+;   {
+;
+;       uint StepSize;                                ; Offset:    0
+;       float ResDiffuse;                             ; Offset:    4
+;       float ResSpecular;                            ; Offset:    8
+;       float normalCompareThreshold;                 ; Offset:   12
+;       float ResolutionWidth;                        ; Offset:   16
+;       float ResolutionHeight;                       ; Offset:   20
+;       float DiffuseScaler;                          ; Offset:   24
+;       float SpecularScaler;                         ; Offset:   28
+;       row_major float4x4 prevViewMat;               ; Offset:   32
+;       row_major float4x4 prevProjMat;               ; Offset:   96
+;       float3 prevZToLinear;                         ; Offset:  160
+;       float AODistance;                             ; Offset:  172
+;       float SurfelSize;                             ; Offset:  176
+;       float SurfelReprojectionThreshold;            ; Offset:  180
+;       float ResolutionRatio;                        ; Offset:  184
+;       float SpecularRoughnessThreshold;             ; Offset:  188
+;       float CurrentLuminance;                       ; Offset:  192
+;       float PreviousLuminance;                      ; Offset:  196
+;       uint UserStencilValueMask;                    ; Offset:  200
+;       uint UseLinearColor;                          ; Offset:  204
+;       float4 SudokuScrambleRNG;                     ; Offset:  208
+;       float VFXTemporalCompositeRate;               ; Offset:  224
+;       float VFXDiffuseBoost;                        ; Offset:  228
+;       float VFXSpecularBoost;                       ; Offset:  232
+;       uint VFXSpecularMipBias;                      ; Offset:  236
+;       float VFXDiffuseResolutionRatio;              ; Offset:  240
+;       float VFXSpecularResolutionRatio;             ; Offset:  244
+;       float VFXInvalidateTemporalRatio;             ; Offset:  248
+;       float VFXPrevSpecularResolutionRatio;         ; Offset:  252
+;       float VFXVolumeValueMin;                      ; Offset:  256
+;       float VFXVolumeValueMax;                      ; Offset:  260
+;       float VFXVolumeColorIntensity;                ; Offset:  264
+;       uint VFXVolumeSpecularMaxSamplingNum;         ; Offset:  268
+;       float2 VFX_reserved;                          ; Offset:  272
+;       uint VFXVolumeDiffuseMaxSamplingNum;          ; Offset:  280
+;       float VFXVolumeAbsorptionCoef;                ; Offset:  284
+;   
+;   } RayTracingDenoiserConstantBufferInfo;           ; Offset:    0 Size:   288
+;
+; }
+;
+;
+; Resource Bindings:
+;
+; Name                                 Type  Format         Dim      ID      HLSL Bind  Count
+; ------------------------------ ---------- ------- ----------- ------- -------------- ------
+; RayTracingDenoiserConstantBufferInfo   cbuffer      NA          NA     CB0            cb0     1
+; normalSRV                         texture     u32          2d      T0             t0     1
+; specularSRV                       texture     u32          2d      T1             t1     1
+; specularUAV                           UAV     u32          2d      U0             u0     1
+;
+target datalayout = "e-m:e-p:32:32-i1:32-i8:8-i16:16-i32:32-i64:64-f16:16-f32:32-f64:64-n8:16:32:64"
+target triple = "dxil-ms-dx"
+
+%dx.types.Handle = type { i8* }
+%dx.types.ResBind = type { i32, i32, i32, i8 }
+%dx.types.ResourceProperties = type { i32, i32 }
+%dx.types.CBufRet.f32 = type { float, float, float, float }
+%dx.types.ResRet.i32 = type { i32, i32, i32, i32, i32 }
+%"class.Texture2D<unsigned int>" = type { i32, %"class.Texture2D<unsigned int>::mips_type" }
+%"class.Texture2D<unsigned int>::mips_type" = type { i32 }
+%"class.RWTexture2D<unsigned int>" = type { i32 }
+%RayTracingDenoiserConstantBufferInfo = type { i32, float, float, float, float, float, float, float, %class.matrix.float.4.4, %class.matrix.float.4.4, <3 x float>, float, float, float, float, float, float, float, i32, i32, <4 x float>, float, float, float, i32, float, float, float, float, float, float, float, i32, <2 x float>, i32, float }
+%class.matrix.float.4.4 = type { [4 x <4 x float>] }
+
+define void @rayTracingSpatialAccumulation_main() {
+  %1 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 1 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %2 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 0 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %3 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %4 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 2 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %5 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %4, %dx.types.ResourceProperties { i32 13, i32 288 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %6 = call i32 @dx.op.threadId.i32(i32 93, i32 0)  ; ThreadId(component)
+  %7 = call i32 @dx.op.threadId.i32(i32 93, i32 1)  ; ThreadId(component)
+  %8 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %5, i32 1)  ; CBufferLoadLegacy(handle,regIndex)
+  %9 = extractvalue %dx.types.CBufRet.f32 %8, 0
+  %10 = fptrunc float %9 to half
+  %11 = extractvalue %dx.types.CBufRet.f32 %8, 1
+  %12 = fptrunc float %11 to half
+  %13 = fptosi half %10 to i32
+  %14 = fptosi half %12 to i32
+  %15 = or i32 %7, %6
+  %16 = icmp sgt i32 %15, -1
+  %17 = icmp slt i32 %6, %13
+  %18 = and i1 %16, %17
+  %19 = icmp slt i32 %7, %14
+  %20 = and i1 %18, %19
+  br i1 %20, label %21, label %121
+
+; <label>:21                                      ; preds = %0
+  %22 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %23 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %22, i32 0, i32 %6, i32 %7, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %24 = extractvalue %dx.types.ResRet.i32 %23, 0
+  %25 = lshr i32 %24, 16
+  %26 = call float @dx.op.legacyF16ToF32(i32 131, i32 %25)  ; LegacyF16ToF32(value)
+  %27 = fptrunc float %26 to half
+  %28 = fcmp fast ugt half %27, 0xH0000
+  br i1 %28, label %69, label %121
+
+; <label>:29                                      ; preds = %69
+  %30 = call float @dx.op.unary.f32(i32 23, float %119)  ; Log(value)
+  %31 = call float @dx.op.unary.f32(i32 28, float %30)  ; Round_pi(value)
+  %32 = fsub fast float -0.000000e+00, %31
+  %33 = call float @dx.op.unary.f32(i32 21, float %32)  ; Exp(value)
+  %34 = fmul fast float %33, 2.560000e+02
+  %35 = fmul fast float %34, %115
+  %36 = fmul fast float %34, %116
+  %37 = fmul fast float %34, %117
+  %38 = call float @dx.op.unary.f32(i32 26, float %35)  ; Round_ne(value)
+  %39 = call float @dx.op.unary.f32(i32 26, float %36)  ; Round_ne(value)
+  %40 = call float @dx.op.unary.f32(i32 26, float %37)  ; Round_ne(value)
+  %41 = fptoui float %38 to i32
+  %42 = fptoui float %39 to i32
+  %43 = fptoui float %40 to i32
+  %44 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %41)  ; UMin(a,b)
+  %45 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %42)  ; UMin(a,b)
+  %46 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %43)  ; UMin(a,b)
+  %47 = fcmp fast olt float %112, 0.000000e+00
+  %48 = select i1 %47, i32 256, i32 0
+  %49 = fcmp fast olt float %113, 0.000000e+00
+  %50 = select i1 %49, i32 131072, i32 0
+  %51 = or i32 %50, %48
+  %52 = fcmp fast olt float %114, 0.000000e+00
+  %53 = select i1 %52, i32 67108864, i32 0
+  %54 = or i32 %51, %53
+  %55 = fadd fast float %31, 3.100000e+01
+  %56 = call float @dx.op.binary.f32(i32 35, float %55, float 0.000000e+00)  ; FMax(a,b)
+  %57 = call float @dx.op.binary.f32(i32 36, float %56, float 3.100000e+01)  ; FMin(a,b)
+  %58 = fptoui float %57 to i32
+  %59 = shl i32 %58, 27
+  %60 = shl i32 %45, 9
+  %61 = shl i32 %46, 18
+  %62 = or i32 %54, %44
+  %63 = or i32 %62, %60
+  %64 = or i32 %63, %61
+  %65 = or i32 %64, %59
+  br label %66
+
+; <label>:66                                      ; preds = %69, %29
+  %67 = phi i32 [ %65, %29 ], [ 0, %69 ]
+  %68 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 261 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<U32>
+  call void @dx.op.textureStore.i32(i32 67, %dx.types.Handle %68, i32 %6, i32 %7, i32 undef, i32 %67, i32 %67, i32 %67, i32 %67, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  br label %121
+
+; <label>:69                                      ; preds = %21
+  %70 = uitofp i32 %6 to float
+  %71 = uitofp i32 %7 to float
+  %72 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %5, i32 0)  ; CBufferLoadLegacy(handle,regIndex)
+  %73 = extractvalue %dx.types.CBufRet.f32 %72, 2
+  %74 = fdiv fast float %70, %73
+  %75 = fdiv fast float %71, %73
+  %76 = fptoui float %74 to i32
+  %77 = fptoui float %75 to i32
+  %78 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %79 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %78, i32 0, i32 %76, i32 %77, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %80 = extractvalue %dx.types.ResRet.i32 %79, 0
+  %81 = lshr i32 %80, 27
+  %82 = add nsw i32 %81, -31
+  %83 = sitofp i32 %82 to float
+  %84 = call float @dx.op.unary.f32(i32 21, float %83)  ; Exp(value)
+  %85 = fmul fast float %84, 3.906250e-03
+  %86 = and i32 %80, 255
+  %87 = uitofp i32 %86 to float
+  %88 = lshr i32 %80, 9
+  %89 = and i32 %88, 255
+  %90 = uitofp i32 %89 to float
+  %91 = lshr i32 %80, 18
+  %92 = and i32 %91, 255
+  %93 = uitofp i32 %92 to float
+  %94 = fmul fast float %87, %85
+  %95 = fmul fast float %90, %85
+  %96 = fmul fast float %93, %85
+  %97 = and i32 %80, 256
+  %98 = icmp ne i32 %97, 0
+  %99 = select i1 %98, float -1.000000e+00, float 1.000000e+00
+  %100 = fmul fast float %94, %99
+  %101 = and i32 %80, 131072
+  %102 = icmp ne i32 %101, 0
+  %103 = select i1 %102, float -1.000000e+00, float 1.000000e+00
+  %104 = fmul fast float %95, %103
+  %105 = and i32 %80, 67108864
+  %106 = icmp ne i32 %105, 0
+  %107 = select i1 %106, float -1.000000e+00, float 1.000000e+00
+  %108 = fmul fast float %96, %107
+  %109 = call float @dx.op.binary.f32(i32 35, float %100, float -1.000000e+00)  ; FMax(a,b)
+  %110 = call float @dx.op.binary.f32(i32 35, float %104, float -1.000000e+00)  ; FMax(a,b)
+  %111 = call float @dx.op.binary.f32(i32 35, float %108, float -1.000000e+00)  ; FMax(a,b)
+  %112 = call float @dx.op.binary.f32(i32 36, float %109, float 1.000000e+00)  ; FMin(a,b)
+  %113 = call float @dx.op.binary.f32(i32 36, float %110, float 1.000000e+00)  ; FMin(a,b)
+  %114 = call float @dx.op.binary.f32(i32 36, float %111, float 1.000000e+00)  ; FMin(a,b)
+  %115 = call float @dx.op.unary.f32(i32 6, float %112)  ; FAbs(value)
+  %116 = call float @dx.op.unary.f32(i32 6, float %113)  ; FAbs(value)
+  %117 = call float @dx.op.unary.f32(i32 6, float %114)  ; FAbs(value)
+  %118 = call float @dx.op.binary.f32(i32 35, float %115, float %116)  ; FMax(a,b)
+  %119 = call float @dx.op.binary.f32(i32 35, float %118, float %117)  ; FMax(a,b)
+  %120 = fcmp fast oeq float %119, 0.000000e+00
+  br i1 %120, label %66, label %29
+
+; <label>:121                                     ; preds = %66, %21, %0
+  ret void
+}
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.threadId.i32(i32, i32) #0
+
+; Function Attrs: nounwind
+declare void @dx.op.textureStore.i32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32, i8) #1
+
+; Function Attrs: nounwind readonly
+declare %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32) #2
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.unary.f32(i32, float) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.binary.f32(i32, float, float) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.legacyF16ToF32(i32, i32) #0
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.binary.i32(i32, i32, i32) #0
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32, %dx.types.Handle, i32) #2
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.annotateHandle(i32, %dx.types.Handle, %dx.types.ResourceProperties) #0
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.createHandleFromBinding(i32, %dx.types.ResBind, i32, i1) #0
+
+attributes #0 = { nounwind readnone }
+attributes #1 = { nounwind }
+attributes #2 = { nounwind readonly }
+
+!llvm.ident = !{!0}
+!dx.version = !{!1}
+!dx.valver = !{!2}
+!dx.shaderModel = !{!3}
+!dx.resources = !{!4}
+!dx.entryPoints = !{!13}
+
+!0 = !{!"clang version 3.7 (tags/RELEASE_370/final)"}
+!1 = !{i32 1, i32 6}
+!2 = !{i32 1, i32 7}
+!3 = !{!"cs", i32 6, i32 6}
+!4 = !{!5, !9, !11, null}
+!5 = !{!6, !8}
+!6 = !{i32 0, %"class.Texture2D<unsigned int>"* undef, !"", i32 0, i32 0, i32 1, i32 2, i32 0, !7}
+!7 = !{i32 0, i32 5}
+!8 = !{i32 1, %"class.Texture2D<unsigned int>"* undef, !"", i32 0, i32 1, i32 1, i32 2, i32 0, !7}
+!9 = !{!10}
+!10 = !{i32 0, %"class.RWTexture2D<unsigned int>"* undef, !"", i32 0, i32 0, i32 1, i32 2, i1 false, i1 false, i1 false, !7}
+!11 = !{!12}
+!12 = !{i32 0, %RayTracingDenoiserConstantBufferInfo* undef, !"", i32 0, i32 0, i32 1, i32 288, null}
+!13 = !{void ()* @rayTracingSpatialAccumulation_main, !"rayTracingSpatialAccumulation_main", null, !4, !14}
+!14 = !{i32 0, i64 8388896, i32 4, !15, i32 5, !16}
+!15 = !{i32 32, i32 32, i32 1}
+!16 = !{i32 0}
+

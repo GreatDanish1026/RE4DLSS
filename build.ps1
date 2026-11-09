@@ -31,6 +31,8 @@ $cmd = @(
     "call `"$vcvars`" >nul",
     "fxc /nologo /T cs_5_1 /E main /O3 /Vn kUiAlphaCs /Fh `"$obj\ui_alpha_cs.h`" `"$root\src\ui_alpha.hlsl`" >nul",
     "fxc /nologo /T cs_5_1 /E main /O3 /Vn kHudComposeCs /Fh `"$obj\hud_compose_cs.h`" `"$root\src\hud_compose.hlsl`" >nul",
+    "fxc /nologo /T cs_5_1 /E main /O3 /Vn kGuideCs /Fh `"$obj\guide_cs.h`" `"$root\src\guide.hlsl`" >nul",
+    "fxc /nologo /T cs_5_1 /E main /O3 /Vn kGuideViewCs /Fh `"$obj\guide_view_cs.h`" `"$root\src\guide_view.hlsl`" >nul",
     ("cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX " +
      "/I `"$obj`" /I `"$root\third_party\imgui`" /I `"$root\third_party\reshade\include`" /I `"$root\third_party\dlss\include`" " +
      "/I `"$root\third_party\streamline\include`" " +
@@ -46,6 +48,8 @@ Write-Host "Built $addon"
 
 # NVIDIA's signed DLSS runtime (310.9.16, from the Streamline 2.14.16 SDK's bin\x64; not in git).
 $ngx = "$root\third_party\bin\nvngx_dlss.dll"
+# DLSS Ray Reconstruction 310.9.16 (same source).
+$ngxd = "$root\third_party\bin\nvngx_dlssd.dll"
 # NVIDIA's Streamline runtime (frame generation), signed, in a streamline folder next to the exe.
 $sl = "$root\third_party\streamline\bin\x64"
 $slFiles = "sl.interposer.dll", "sl.common.dll", "sl.dlss_g.dll", "sl.reflex.dll", "sl.pcl.dll", "nvngx_dlssg.dll"
@@ -54,19 +58,20 @@ $ffx = "$root\third_party\fidelityfx\bin"
 $ffxFiles = "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll", "amd_fidelityfx_framegeneration_dx12.dll"
 if ($Install -or $Package) {
     if (-not (Test-Path $ngx)) { throw "nvngx_dlss.dll not found in third_party\bin" }
+    if (-not (Test-Path $ngxd)) { throw "nvngx_dlssd.dll not found in third_party\bin" }
     foreach ($f in $slFiles) { if (-not (Test-Path "$sl\$f")) { throw "$f not found in $sl (unzip NVIDIA's Streamline 2.14.16 release there)" } }
     foreach ($f in $ffxFiles) { if (-not (Test-Path "$ffx\$f")) { throw "$f not found in $ffx (copy Kits\FidelityFX\signedbin from AMD's FSR SDK 2.4.0)" } }
 }
 
 # The add-on and the NVIDIA and AMD runtimes, as they go in the game folder.
 function Copy-Runtime([string]$dest) {
-    Copy-Item $addon, $ngx $dest -Force
+    Copy-Item $addon, $ngx, $ngxd $dest -Force
     foreach ($f in $ffxFiles) { Copy-Item "$ffx\$f" $dest -Force }
     New-Item -ItemType Directory -Force "$dest\streamline" | Out-Null
     foreach ($f in $slFiles) { Copy-Item "$sl\$f" "$dest\streamline" -Force }
     # Streamline starts NGX first, with the streamline folder as where DLSS lives: DLSS upscaling
     # then looks there too.
-    Copy-Item $ngx "$dest\streamline" -Force
+    Copy-Item $ngx, $ngxd "$dest\streamline" -Force
 }
 
 if ($Install) {
@@ -106,7 +111,7 @@ if ($Package) {
     @(
         "name=RE4DLSS - DLSS, FSR 3/4 and frame generation for Resident Evil 4",
         "version=v$version",
-        "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler, and adds DLSS or FSR frame generation: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. With REFramework, the overlay's render resolution adds Native (100%): DLAA, or FSR native anti-aliasing. DLSS needs an NVIDIA RTX card (frame generation RTX 40/50); FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
+        "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler, and adds DLSS or FSR frame generation and experimental DLSS Ray Reconstruction for the ray-traced reflections: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. With REFramework, the overlay's render resolution adds Native (100%): DLAA, or FSR native anti-aliasing. DLSS needs an NVIDIA RTX card (frame generation RTX 40/50); FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
         "author=Scott Dinwiddie"
     ) | Set-Content "$mod\modinfo.ini" -Encoding ascii
 

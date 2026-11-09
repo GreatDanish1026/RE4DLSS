@@ -56,3 +56,31 @@ Performance and Ultra Performance; 5-7 change nothing. Setting it takes effect a
 `RenderConfig.ImageQualityRate` is ignored while FSR 2 is on. `reframework/RE4DLSS.lua` applies the
 value the add-on writes to `reframework/data/RE4DLSS_mode.txt` (-1 = the game's own) and reports
 the current one in `RE4DLSS_status.txt`.
+
+## 1.3.0: DLSS Ray Reconstruction (2026-11-09)
+
+RE4 ray traces its reflections only (local_config.ini AppRayTraceOnOff=2): the specular-only form
+of RE2/RE3/RE7's chain (RE2DLSS `docs/FINDINGS.md` "Ray tracing chain"), at 1920x1080 for a
+2560x1440 render, before FSR 2. Names from the dumps in `docs/shaders/rt`:
+
+| Pass | RE4 | RE7 |
+|---|---|---|
+| rayTracingShading (specular: u0) | cs3dd76aeb | csec2602f1 |
+| rayTracingSpatialAccumulation (specular) | cs567f11a3 | cs2712f710 |
+| rayTracingMeanVariance | cs200f44e3 | cs81dbf3d7 |
+| rayTracingTemporalAccumulation (specular) | csfc8ea1ae | cs38fb0c41 |
+| rayTracingDeflickerSpecular | cse1d94131 | cs387ae12e |
+| rayTracingBilateralFilter | csb38899cf | cs3f14ab68 |
+| rayTracingUpscale (t3 BaseColorMetallic, t4 NormalXNormalYRoughnessMisc, t7 historySpecular) | cs4c66de88 | csba99f22d |
+
+The Ray Reconstruction section of `src/upscaler.cpp` is RE7DLSS's, with one signal. At FSR 2's
+accumulate, the guides are made from rayTracingUpscale's G-buffer, FSR 2's translated depth (r32f,
+reverse-Z) and SceneInfo (also looked for while RR is on, not only for frame generation), and
+DLSS-D runs in place of DLSS (with FSR 2's pre-exposure). RR is kept while rayTracingUpscale ran
+in the last 60 frames. Some frames' SceneInfo match is another view (not a perspective camera):
+then the last good camera is used for up to 60 frames; without that RR flipped to Super
+Resolution about twice a second.
+
+Test (2026-11-09, 4K, ray tracing on): RR at Quality (2560x1440 and 2258x1270) and Ultra
+Performance (1280x720), steady once the camera fallback was in, on/off switching clean; Super
+Resolution while the game doesn't ray trace (a cutscene or menu stretch).

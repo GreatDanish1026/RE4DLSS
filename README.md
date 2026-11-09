@@ -1,8 +1,9 @@
-# RE4DLSS 1.2.2
+# RE4DLSS 1.3.0
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
-**DLSS or FSR frame generation**. The game ships AMD FSR 2.1; with this add-on, FSR 2's quality
+**DLSS or FSR frame generation** and experimental **DLSS Ray Reconstruction** for the ray-traced
+reflections. The game ships AMD FSR 2.1; with this add-on, FSR 2's quality
 setting (or the add-on's render resolution, which adds Native: DLAA) picks the render size and the
 chosen upscaler does the upscaling.
 
@@ -30,18 +31,28 @@ support, and REFramework for the render resolution dropdown.
 - **Sharpening**: FSR 2's sharpening pass still runs on the upscaled image, so the game's
   Sharpness setting applies as before.
 - **DLSS model**: Automatic (default: K, M at Performance, L at Ultra Performance, as NVIDIA recommends), or K, J, L or M (DLSS 4.5) at every resolution, or NVIDIA's default.
+- **Ray Reconstruction** (experimental, DLSS only, off by default): with the game's ray tracing on,
+  NVIDIA's DLSS Ray Reconstruction 310.9.16 replaces DLSS Super Resolution. It upscales and cleans up
+  the remaining noise in the ray-traced reflections, on top of the game's own ray tracing denoiser
+  (built from the game's G-buffer and camera). **Ray Reconstruction model**: NVIDIA's default, D, E
+  or F; an override in the NVIDIA App takes precedence. The Advanced tab can skip parts of the
+  game's denoiser and hand Ray Reconstruction the reflection rays directly, for testing (the game
+  traces below the render size, so that looks blotchier), and shows the surface pictures Ray
+  Reconstruction gets (colour, reflectivity, normals, roughness). Without ray tracing (menus, some
+  cutscenes, or ray tracing off) it uses Super Resolution.
 
 Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShade.ini` under
 `[RE4DLSS]`.
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.2.2.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.3.0.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
-- `RE4DLSS.addon64` (the add-on) and `nvngx_dlss.dll` (NVIDIA's DLSS runtime, 310.9.16)
-- `streamline\` (NVIDIA's frame generation runtime, Streamline 2.14.16, with a copy of
-  `nvngx_dlss.dll`)
+- `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
+  Ray Reconstruction runtimes, 310.9.16)
+- `streamline\` (NVIDIA's frame generation runtime, Streamline 2.14.16, with copies of
+  `nvngx_dlss.dll` and `nvngx_dlssd.dll`)
 - `amd_fidelityfx_loader_dx12.dll`, `amd_fidelityfx_upscaler_dx12.dll` and
   `amd_fidelityfx_framegeneration_dx12.dll` (AMD's FSR runtime, SDK 2.4.0)
 - `reframework\autorun\RE4DLSS.lua` (sets the render size for the render resolution dropdown)
@@ -65,7 +76,7 @@ If the NVIDIA App has a DLSS model override for the game, it takes precedence ov
 ## Notes
 
 - Tested at 3840x2160 on an NVIDIA RTX card at every FSR 2 quality, and with DLSS frame
-  generation 2x.
+  generation 2x; Ray Reconstruction at Quality and Ultra Performance with ray tracing on.
 - Works with REFramework: REFramework hooks NVIDIA's frame generation DLL in a way that would hang
   the game at launch; the add-on steps around that hook while the game's swapchain is created.
 - Frame generation gets the picture without the HUD, so the HUD doesn't warp.
@@ -80,7 +91,7 @@ If the NVIDIA App has a DLSS model override for the game, it takes precedence ov
 `build.ps1` builds `bin\RE4DLSS.addon64` with Visual Studio 2022's C++ tools (MSVC): `-Install`
 copies it, the NVIDIA and AMD runtimes and the REFramework script into the game folder; `-Package` makes the Fluffy Mod
 Manager zip in `bin\release`. The runtimes aren't in the repository: put NVIDIA's signed
-`nvngx_dlss.dll` 310.9.16 in `third_party\bin`, the Streamline 2.14.16 release's `bin\x64` in
+`nvngx_dlss.dll` and `nvngx_dlssd.dll` 310.9.16 in `third_party\bin`, the Streamline 2.14.16 release's `bin\x64` in
 `third_party\streamline\bin\x64`, and AMD's signed FSR SDK 2.4.0 DLLs
 (`Kits\FidelityFX\signedbin`) in `third_party\fidelityfx\bin`. `docs\FINDINGS.md` describes the
 game's FSR 2 passes, `docs\FSR.md` the FSR upscaler and `docs\FRAMEGEN.md` frame generation.

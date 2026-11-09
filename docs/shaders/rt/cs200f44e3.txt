@@ -1,0 +1,991 @@
+;
+; Input signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+;
+; Output signature:
+;
+; Name                 Index   Mask Register SysValue  Format   Used
+; -------------------- ----- ------ -------- -------- ------- ------
+; no parameters
+; shader debug name: 625209605196d9ecde46e09ee0e8ceea.pdb
+; shader hash: 625209605196d9ecde46e09ee0e8ceea
+;
+; Pipeline Runtime Information: 
+;
+;PSVRuntimeInfo:
+; Compute Shader
+; NumThreads=(8,8,1)
+; MinimumExpectedWaveLaneCount: 0
+; MaximumExpectedWaveLaneCount: 4294967295
+; UsesViewID: false
+; SigInputElements: 0
+; SigOutputElements: 0
+; SigPatchConstOrPrimElements: 0
+; SigInputVectors: 0
+; SigOutputVectors[0]: 0
+; SigOutputVectors[1]: 0
+; SigOutputVectors[2]: 0
+; SigOutputVectors[3]: 0
+;
+;
+; Buffer Definitions:
+;
+; cbuffer SceneInfo
+; {
+;
+;   struct SceneInfo
+;   {
+;
+;       row_major float4x4 viewProjMat;               ; Offset:    0
+;       row_major float3x4 transposeViewMat;          ; Offset:   64
+;       row_major float3x4 transposeViewInvMat;       ; Offset:  112
+;       float4 projElement[2];                        ; Offset:  160
+;       float4 projInvElements[2];                    ; Offset:  192
+;       row_major float4x4 viewProjInvMat;            ; Offset:  224
+;       row_major float4x4 prevViewProjMat;           ; Offset:  288
+;       float3 ZToLinear;                             ; Offset:  352
+;       float subdivisionLevel;                       ; Offset:  364
+;       float2 screenSize;                            ; Offset:  368
+;       float2 screenInverseSize;                     ; Offset:  376
+;       float2 cullingHelper;                         ; Offset:  384
+;       float cameraNearPlane;                        ; Offset:  392
+;       float cameraFarPlane;                         ; Offset:  396
+;       float4 viewFrustum[6];                        ; Offset:  400
+;       float4 clipplane;                             ; Offset:  496
+;       float2 vrsVelocityThreshold;                  ; Offset:  512
+;       uint GPUVisibleMask;                          ; Offset:  520
+;       uint resolutionRatioPacked;                   ; Offset:  524
+;   
+;   } SceneInfo;                                      ; Offset:    0 Size:   528
+;
+; }
+;
+; cbuffer RayTracingDenoiserConstantBufferInfo
+; {
+;
+;   struct RayTracingDenoiserConstantBufferInfo
+;   {
+;
+;       uint StepSize;                                ; Offset:    0
+;       float ResDiffuse;                             ; Offset:    4
+;       float ResSpecular;                            ; Offset:    8
+;       float normalCompareThreshold;                 ; Offset:   12
+;       float ResolutionWidth;                        ; Offset:   16
+;       float ResolutionHeight;                       ; Offset:   20
+;       float DiffuseScaler;                          ; Offset:   24
+;       float SpecularScaler;                         ; Offset:   28
+;       row_major float4x4 prevViewMat;               ; Offset:   32
+;       row_major float4x4 prevProjMat;               ; Offset:   96
+;       float3 prevZToLinear;                         ; Offset:  160
+;       float AODistance;                             ; Offset:  172
+;       float SurfelSize;                             ; Offset:  176
+;       float SurfelReprojectionThreshold;            ; Offset:  180
+;       float ResolutionRatio;                        ; Offset:  184
+;       float SpecularRoughnessThreshold;             ; Offset:  188
+;       float CurrentLuminance;                       ; Offset:  192
+;       float PreviousLuminance;                      ; Offset:  196
+;       uint UserStencilValueMask;                    ; Offset:  200
+;       uint UseLinearColor;                          ; Offset:  204
+;       float4 SudokuScrambleRNG;                     ; Offset:  208
+;       float VFXTemporalCompositeRate;               ; Offset:  224
+;       float VFXDiffuseBoost;                        ; Offset:  228
+;       float VFXSpecularBoost;                       ; Offset:  232
+;       uint VFXSpecularMipBias;                      ; Offset:  236
+;       float VFXDiffuseResolutionRatio;              ; Offset:  240
+;       float VFXSpecularResolutionRatio;             ; Offset:  244
+;       float VFXInvalidateTemporalRatio;             ; Offset:  248
+;       float VFXPrevSpecularResolutionRatio;         ; Offset:  252
+;       float VFXVolumeValueMin;                      ; Offset:  256
+;       float VFXVolumeValueMax;                      ; Offset:  260
+;       float VFXVolumeColorIntensity;                ; Offset:  264
+;       uint VFXVolumeSpecularMaxSamplingNum;         ; Offset:  268
+;       float2 VFX_reserved;                          ; Offset:  272
+;       uint VFXVolumeDiffuseMaxSamplingNum;          ; Offset:  280
+;       float VFXVolumeAbsorptionCoef;                ; Offset:  284
+;   
+;   } RayTracingDenoiserConstantBufferInfo;           ; Offset:    0 Size:   288
+;
+; }
+;
+;
+; Resource Bindings:
+;
+; Name                                 Type  Format         Dim      ID      HLSL Bind  Count
+; ------------------------------ ---------- ------- ----------- ------- -------------- ------
+; SceneInfo                         cbuffer      NA          NA     CB0            cb0     1
+; RayTracingDenoiserConstantBufferInfo   cbuffer      NA          NA     CB1            cb1     1
+; ModifiedGBufferSRV                texture     f32          2d      T0             t0     1
+; NormalXNormalYRoughnessMiscSRV    texture     f32          2d      T1             t1     1
+; inputColorSRV                     texture     u32          2d      T2             t2     1
+; outputMeanVarianceUAV                 UAV     u32          2d      U0             u0     1
+;
+target datalayout = "e-m:e-p:32:32-i1:32-i8:8-i16:16-i32:32-i64:64-f16:16-f32:32-f64:64-n8:16:32:64"
+target triple = "dxil-ms-dx"
+
+%dx.types.Handle = type { i8* }
+%dx.types.ResBind = type { i32, i32, i32, i8 }
+%dx.types.ResourceProperties = type { i32, i32 }
+%dx.types.CBufRet.f32 = type { float, float, float, float }
+%dx.types.ResRet.f32 = type { float, float, float, float, i32 }
+%dx.types.ResRet.i32 = type { i32, i32, i32, i32, i32 }
+%"class.Texture2D<vector<float, 4> >" = type { <4 x float>, %"class.Texture2D<vector<float, 4> >::mips_type" }
+%"class.Texture2D<vector<float, 4> >::mips_type" = type { i32 }
+%"class.Texture2D<unsigned int>" = type { i32, %"class.Texture2D<unsigned int>::mips_type" }
+%"class.Texture2D<unsigned int>::mips_type" = type { i32 }
+%"class.RWTexture2D<vector<unsigned int, 2> >" = type { <2 x i32> }
+%SceneInfo = type { %class.matrix.float.4.4, %class.matrix.float.3.4, %class.matrix.float.3.4, [2 x <4 x float>], [2 x <4 x float>], %class.matrix.float.4.4, %class.matrix.float.4.4, <3 x float>, float, <2 x float>, <2 x float>, <2 x float>, float, float, [6 x <4 x float>], <4 x float>, <2 x float>, i32, i32 }
+%class.matrix.float.3.4 = type { [3 x <4 x float>] }
+%class.matrix.float.4.4 = type { [4 x <4 x float>] }
+%RayTracingDenoiserConstantBufferInfo = type { i32, float, float, float, float, float, float, float, %class.matrix.float.4.4, %class.matrix.float.4.4, <3 x float>, float, float, float, float, float, float, float, i32, i32, <4 x float>, float, float, float, i32, float, float, float, float, float, float, float, i32, <2 x float>, i32, float }
+
+define void @rayTracingMeanVariance_main() {
+  %1 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 1 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %2 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 2, i32 2, i32 0, i8 0 }, i32 2, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %3 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 0 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %4 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %5 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 1, i32 1, i32 0, i8 2 }, i32 1, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %6 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind { i32 0, i32 0, i32 0, i8 2 }, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
+  %7 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %5, %dx.types.ResourceProperties { i32 13, i32 288 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %8 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %6, %dx.types.ResourceProperties { i32 13, i32 528 })  ; AnnotateHandle(res,props)  resource: CBuffer
+  %9 = call i32 @dx.op.threadId.i32(i32 93, i32 0)  ; ThreadId(component)
+  %10 = call i32 @dx.op.threadId.i32(i32 93, i32 1)  ; ThreadId(component)
+  %11 = uitofp i32 %9 to float
+  %12 = uitofp i32 %10 to float
+  %13 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %8, i32 23)  ; CBufferLoadLegacy(handle,regIndex)
+  %14 = extractvalue %dx.types.CBufRet.f32 %13, 0
+  %15 = extractvalue %dx.types.CBufRet.f32 %13, 1
+  %16 = fmul fast float %14, %11
+  %17 = fmul fast float %15, %12
+  %18 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 1)  ; CBufferLoadLegacy(handle,regIndex)
+  %19 = extractvalue %dx.types.CBufRet.f32 %18, 0
+  %20 = extractvalue %dx.types.CBufRet.f32 %18, 1
+  %21 = fdiv fast float %16, %19
+  %22 = fdiv fast float %17, %20
+  %23 = fptosi float %21 to i32
+  %24 = fptosi float %22 to i32
+  %25 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %3, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %26 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %25, i32 0, i32 %23, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %27 = extractvalue %dx.types.ResRet.f32 %26, 2
+  %28 = call float @dx.op.binary.f32(i32 35, float 0x3F847AE140000000, float %27)  ; FMax(a,b)
+  %29 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %4, %dx.types.ResourceProperties { i32 2, i32 1033 })  ; AnnotateHandle(res,props)  resource: Texture2D<4xF32>
+  %30 = call %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32 66, %dx.types.Handle %29, i32 0, i32 %23, i32 %24, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %31 = extractvalue %dx.types.ResRet.f32 %30, 2
+  %32 = extractvalue %dx.types.ResRet.f32 %30, 3
+  %33 = fmul fast float %32, 0x4008CCCCC0000000
+  %34 = call float @dx.op.unary.f32(i32 27, float %33)  ; Round_ni(value)
+  %35 = fcmp fast oeq float %34, 2.000000e+00
+  %36 = fcmp fast une float %31, 0.000000e+00
+  %37 = and i1 %35, %36
+  %38 = select i1 %37, float %31, float %28
+  %39 = add i32 %9, -1
+  %40 = add i32 %10, -1
+  %41 = uitofp i32 %39 to float
+  %42 = fcmp fast oge float %41, %19
+  %43 = uitofp i32 %40 to float
+  %44 = fcmp fast oge float %43, %20
+  %45 = or i1 %42, %44
+  br i1 %45, label %182, label %137
+
+; <label>:46                                      ; preds = %678
+  %47 = call float @dx.op.unary.f32(i32 23, float %718)  ; Log(value)
+  %48 = call float @dx.op.unary.f32(i32 28, float %47)  ; Round_pi(value)
+  %49 = fsub fast float -0.000000e+00, %48
+  %50 = call float @dx.op.unary.f32(i32 21, float %49)  ; Exp(value)
+  %51 = fmul fast float %50, 2.560000e+02
+  %52 = fmul fast float %51, %714
+  %53 = fmul fast float %51, %715
+  %54 = fmul fast float %51, %716
+  %55 = call float @dx.op.unary.f32(i32 26, float %52)  ; Round_ne(value)
+  %56 = call float @dx.op.unary.f32(i32 26, float %53)  ; Round_ne(value)
+  %57 = call float @dx.op.unary.f32(i32 26, float %54)  ; Round_ne(value)
+  %58 = fptoui float %55 to i32
+  %59 = fptoui float %56 to i32
+  %60 = fptoui float %57 to i32
+  %61 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %58)  ; UMin(a,b)
+  %62 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %59)  ; UMin(a,b)
+  %63 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %60)  ; UMin(a,b)
+  %64 = fcmp fast olt float %711, 0.000000e+00
+  %65 = select i1 %64, i32 256, i32 0
+  %66 = fcmp fast olt float %712, 0.000000e+00
+  %67 = select i1 %66, i32 131072, i32 0
+  %68 = or i32 %67, %65
+  %69 = fcmp fast olt float %713, 0.000000e+00
+  %70 = select i1 %69, i32 67108864, i32 0
+  %71 = or i32 %68, %70
+  %72 = fadd fast float %48, 3.100000e+01
+  %73 = call float @dx.op.binary.f32(i32 35, float %72, float 0.000000e+00)  ; FMax(a,b)
+  %74 = call float @dx.op.binary.f32(i32 36, float %73, float 3.100000e+01)  ; FMin(a,b)
+  %75 = fptoui float %74 to i32
+  %76 = shl i32 %75, 27
+  %77 = shl i32 %62, 9
+  %78 = shl i32 %63, 18
+  %79 = or i32 %71, %61
+  %80 = or i32 %79, %77
+  %81 = or i32 %80, %78
+  %82 = or i32 %81, %76
+  br label %83
+
+; <label>:83                                      ; preds = %678, %46
+  %84 = phi i32 [ %82, %46 ], [ 0, %678 ]
+  %85 = call float @dx.op.binary.f32(i32 35, float %705, float -1.000000e+00)  ; FMax(a,b)
+  %86 = call float @dx.op.binary.f32(i32 35, float %706, float -1.000000e+00)  ; FMax(a,b)
+  %87 = call float @dx.op.binary.f32(i32 35, float %707, float -1.000000e+00)  ; FMax(a,b)
+  %88 = call float @dx.op.binary.f32(i32 36, float %85, float 1.000000e+00)  ; FMin(a,b)
+  %89 = call float @dx.op.binary.f32(i32 36, float %86, float 1.000000e+00)  ; FMin(a,b)
+  %90 = call float @dx.op.binary.f32(i32 36, float %87, float 1.000000e+00)  ; FMin(a,b)
+  %91 = call float @dx.op.unary.f32(i32 6, float %88)  ; FAbs(value)
+  %92 = call float @dx.op.unary.f32(i32 6, float %89)  ; FAbs(value)
+  %93 = call float @dx.op.unary.f32(i32 6, float %90)  ; FAbs(value)
+  %94 = call float @dx.op.binary.f32(i32 35, float %91, float %92)  ; FMax(a,b)
+  %95 = call float @dx.op.binary.f32(i32 35, float %94, float %93)  ; FMax(a,b)
+  %96 = fcmp fast oeq float %95, 0.000000e+00
+  br i1 %96, label %134, label %97
+
+; <label>:97                                      ; preds = %83
+  %98 = call float @dx.op.unary.f32(i32 23, float %95)  ; Log(value)
+  %99 = call float @dx.op.unary.f32(i32 28, float %98)  ; Round_pi(value)
+  %100 = fsub fast float -0.000000e+00, %99
+  %101 = call float @dx.op.unary.f32(i32 21, float %100)  ; Exp(value)
+  %102 = fmul fast float %101, 2.560000e+02
+  %103 = fmul fast float %102, %91
+  %104 = fmul fast float %102, %92
+  %105 = fmul fast float %102, %93
+  %106 = call float @dx.op.unary.f32(i32 26, float %103)  ; Round_ne(value)
+  %107 = call float @dx.op.unary.f32(i32 26, float %104)  ; Round_ne(value)
+  %108 = call float @dx.op.unary.f32(i32 26, float %105)  ; Round_ne(value)
+  %109 = fptoui float %106 to i32
+  %110 = fptoui float %107 to i32
+  %111 = fptoui float %108 to i32
+  %112 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %109)  ; UMin(a,b)
+  %113 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %110)  ; UMin(a,b)
+  %114 = call i32 @dx.op.binary.i32(i32 40, i32 255, i32 %111)  ; UMin(a,b)
+  %115 = fcmp fast olt float %88, 0.000000e+00
+  %116 = select i1 %115, i32 256, i32 0
+  %117 = fcmp fast olt float %89, 0.000000e+00
+  %118 = select i1 %117, i32 131072, i32 0
+  %119 = or i32 %118, %116
+  %120 = fcmp fast olt float %90, 0.000000e+00
+  %121 = select i1 %120, i32 67108864, i32 0
+  %122 = or i32 %119, %121
+  %123 = fadd fast float %99, 3.100000e+01
+  %124 = call float @dx.op.binary.f32(i32 35, float %123, float 0.000000e+00)  ; FMax(a,b)
+  %125 = call float @dx.op.binary.f32(i32 36, float %124, float 3.100000e+01)  ; FMin(a,b)
+  %126 = fptoui float %125 to i32
+  %127 = shl i32 %126, 27
+  %128 = shl i32 %113, 9
+  %129 = shl i32 %114, 18
+  %130 = or i32 %122, %112
+  %131 = or i32 %130, %128
+  %132 = or i32 %131, %129
+  %133 = or i32 %132, %127
+  br label %134
+
+; <label>:134                                     ; preds = %97, %83
+  %135 = phi i32 [ %133, %97 ], [ 0, %83 ]
+  %136 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 4098, i32 517 })  ; AnnotateHandle(res,props)  resource: RWTexture2D<2xU32>
+  call void @dx.op.textureStore.i32(i32 67, %dx.types.Handle %136, i32 %9, i32 %10, i32 undef, i32 %84, i32 %135, i32 %84, i32 %84, i8 15)  ; TextureStore(srv,coord0,coord1,coord2,value0,value1,value2,value3,mask)
+  ret void
+
+; <label>:137                                     ; preds = %0
+  %138 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %139 = extractvalue %dx.types.CBufRet.f32 %138, 3
+  %140 = fcmp fast ult float %38, %139
+  br i1 %140, label %141, label %182
+
+; <label>:141                                     ; preds = %137
+  %142 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %143 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %142, i32 0, i32 %39, i32 %40, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %144 = extractvalue %dx.types.ResRet.i32 %143, 0
+  %145 = lshr i32 %144, 27
+  %146 = add nsw i32 %145, -31
+  %147 = sitofp i32 %146 to float
+  %148 = call float @dx.op.unary.f32(i32 21, float %147)  ; Exp(value)
+  %149 = fmul fast float %148, 3.906250e-03
+  %150 = and i32 %144, 255
+  %151 = uitofp i32 %150 to float
+  %152 = lshr i32 %144, 9
+  %153 = and i32 %152, 255
+  %154 = uitofp i32 %153 to float
+  %155 = lshr i32 %144, 18
+  %156 = and i32 %155, 255
+  %157 = uitofp i32 %156 to float
+  %158 = fmul fast float %151, %149
+  %159 = fmul fast float %154, %149
+  %160 = fmul fast float %157, %149
+  %161 = and i32 %144, 256
+  %162 = icmp ne i32 %161, 0
+  %163 = select i1 %162, float -1.000000e+00, float 1.000000e+00
+  %164 = fmul fast float %158, %163
+  %165 = and i32 %144, 131072
+  %166 = icmp ne i32 %165, 0
+  %167 = select i1 %166, float -1.000000e+00, float 1.000000e+00
+  %168 = fmul fast float %159, %167
+  %169 = and i32 %144, 67108864
+  %170 = icmp ne i32 %169, 0
+  %171 = select i1 %170, float -1.000000e+00, float 1.000000e+00
+  %172 = fmul fast float %160, %171
+  %173 = fsub fast float %164, %172
+  %174 = fmul fast float %173, 5.000000e-01
+  %175 = fadd fast float %174, %172
+  %176 = fsub fast float %168, %175
+  %177 = fmul fast float %176, 5.000000e-01
+  %178 = fadd fast float %177, %175
+  %179 = fmul fast float %178, %178
+  %180 = fmul fast float %173, %173
+  %181 = fmul fast float %176, %176
+  br label %182
+
+; <label>:182                                     ; preds = %141, %137, %0
+  %183 = phi float [ %178, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %184 = phi float [ %173, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %185 = phi float [ %176, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %186 = phi float [ %179, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %187 = phi float [ %180, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %188 = phi float [ %181, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %189 = phi float [ 1.000000e+00, %141 ], [ 0.000000e+00, %0 ], [ 0.000000e+00, %137 ]
+  %190 = fcmp fast oge float %11, %19
+  %191 = or i1 %190, %44
+  br i1 %191, label %244, label %192
+
+; <label>:192                                     ; preds = %182
+  %193 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %194 = extractvalue %dx.types.CBufRet.f32 %193, 3
+  %195 = fcmp fast ult float %38, %194
+  br i1 %195, label %196, label %244
+
+; <label>:196                                     ; preds = %192
+  %197 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %198 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %197, i32 0, i32 %9, i32 %40, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %199 = extractvalue %dx.types.ResRet.i32 %198, 0
+  %200 = lshr i32 %199, 27
+  %201 = add nsw i32 %200, -31
+  %202 = sitofp i32 %201 to float
+  %203 = call float @dx.op.unary.f32(i32 21, float %202)  ; Exp(value)
+  %204 = fmul fast float %203, 3.906250e-03
+  %205 = and i32 %199, 255
+  %206 = uitofp i32 %205 to float
+  %207 = lshr i32 %199, 9
+  %208 = and i32 %207, 255
+  %209 = uitofp i32 %208 to float
+  %210 = lshr i32 %199, 18
+  %211 = and i32 %210, 255
+  %212 = uitofp i32 %211 to float
+  %213 = fmul fast float %206, %204
+  %214 = fmul fast float %209, %204
+  %215 = fmul fast float %212, %204
+  %216 = and i32 %199, 256
+  %217 = icmp ne i32 %216, 0
+  %218 = select i1 %217, float -1.000000e+00, float 1.000000e+00
+  %219 = fmul fast float %213, %218
+  %220 = and i32 %199, 131072
+  %221 = icmp ne i32 %220, 0
+  %222 = select i1 %221, float -1.000000e+00, float 1.000000e+00
+  %223 = fmul fast float %214, %222
+  %224 = and i32 %199, 67108864
+  %225 = icmp ne i32 %224, 0
+  %226 = select i1 %225, float -1.000000e+00, float 1.000000e+00
+  %227 = fmul fast float %215, %226
+  %228 = fsub fast float %219, %227
+  %229 = fmul fast float %228, 5.000000e-01
+  %230 = fadd fast float %229, %227
+  %231 = fsub fast float %223, %230
+  %232 = fmul fast float %231, 5.000000e-01
+  %233 = fadd fast float %232, %230
+  %234 = fadd fast float %233, %183
+  %235 = fadd fast float %228, %184
+  %236 = fadd fast float %231, %185
+  %237 = fmul fast float %233, %233
+  %238 = fmul fast float %228, %228
+  %239 = fmul fast float %231, %231
+  %240 = fadd fast float %237, %186
+  %241 = fadd fast float %238, %187
+  %242 = fadd fast float %239, %188
+  %243 = fadd fast float %189, 1.000000e+00
+  br label %244
+
+; <label>:244                                     ; preds = %196, %192, %182
+  %245 = phi float [ %234, %196 ], [ %183, %182 ], [ %183, %192 ]
+  %246 = phi float [ %235, %196 ], [ %184, %182 ], [ %184, %192 ]
+  %247 = phi float [ %236, %196 ], [ %185, %182 ], [ %185, %192 ]
+  %248 = phi float [ %240, %196 ], [ %186, %182 ], [ %186, %192 ]
+  %249 = phi float [ %241, %196 ], [ %187, %182 ], [ %187, %192 ]
+  %250 = phi float [ %242, %196 ], [ %188, %182 ], [ %188, %192 ]
+  %251 = phi float [ %243, %196 ], [ %189, %182 ], [ %189, %192 ]
+  %252 = add i32 %9, 1
+  %253 = uitofp i32 %252 to float
+  %254 = fcmp fast oge float %253, %19
+  %255 = or i1 %254, %44
+  br i1 %255, label %308, label %256
+
+; <label>:256                                     ; preds = %244
+  %257 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %258 = extractvalue %dx.types.CBufRet.f32 %257, 3
+  %259 = fcmp fast ult float %38, %258
+  br i1 %259, label %260, label %308
+
+; <label>:260                                     ; preds = %256
+  %261 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %262 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %261, i32 0, i32 %252, i32 %40, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %263 = extractvalue %dx.types.ResRet.i32 %262, 0
+  %264 = lshr i32 %263, 27
+  %265 = add nsw i32 %264, -31
+  %266 = sitofp i32 %265 to float
+  %267 = call float @dx.op.unary.f32(i32 21, float %266)  ; Exp(value)
+  %268 = fmul fast float %267, 3.906250e-03
+  %269 = and i32 %263, 255
+  %270 = uitofp i32 %269 to float
+  %271 = lshr i32 %263, 9
+  %272 = and i32 %271, 255
+  %273 = uitofp i32 %272 to float
+  %274 = lshr i32 %263, 18
+  %275 = and i32 %274, 255
+  %276 = uitofp i32 %275 to float
+  %277 = fmul fast float %270, %268
+  %278 = fmul fast float %273, %268
+  %279 = fmul fast float %276, %268
+  %280 = and i32 %263, 256
+  %281 = icmp ne i32 %280, 0
+  %282 = select i1 %281, float -1.000000e+00, float 1.000000e+00
+  %283 = fmul fast float %277, %282
+  %284 = and i32 %263, 131072
+  %285 = icmp ne i32 %284, 0
+  %286 = select i1 %285, float -1.000000e+00, float 1.000000e+00
+  %287 = fmul fast float %278, %286
+  %288 = and i32 %263, 67108864
+  %289 = icmp ne i32 %288, 0
+  %290 = select i1 %289, float -1.000000e+00, float 1.000000e+00
+  %291 = fmul fast float %279, %290
+  %292 = fsub fast float %283, %291
+  %293 = fmul fast float %292, 5.000000e-01
+  %294 = fadd fast float %293, %291
+  %295 = fsub fast float %287, %294
+  %296 = fmul fast float %295, 5.000000e-01
+  %297 = fadd fast float %296, %294
+  %298 = fadd fast float %297, %245
+  %299 = fadd fast float %292, %246
+  %300 = fadd fast float %295, %247
+  %301 = fmul fast float %297, %297
+  %302 = fmul fast float %292, %292
+  %303 = fmul fast float %295, %295
+  %304 = fadd fast float %301, %248
+  %305 = fadd fast float %302, %249
+  %306 = fadd fast float %303, %250
+  %307 = fadd fast float %251, 1.000000e+00
+  br label %308
+
+; <label>:308                                     ; preds = %260, %256, %244
+  %309 = phi float [ %298, %260 ], [ %245, %244 ], [ %245, %256 ]
+  %310 = phi float [ %299, %260 ], [ %246, %244 ], [ %246, %256 ]
+  %311 = phi float [ %300, %260 ], [ %247, %244 ], [ %247, %256 ]
+  %312 = phi float [ %304, %260 ], [ %248, %244 ], [ %248, %256 ]
+  %313 = phi float [ %305, %260 ], [ %249, %244 ], [ %249, %256 ]
+  %314 = phi float [ %306, %260 ], [ %250, %244 ], [ %250, %256 ]
+  %315 = phi float [ %307, %260 ], [ %251, %244 ], [ %251, %256 ]
+  %316 = fcmp fast oge float %12, %20
+  %317 = or i1 %42, %316
+  br i1 %317, label %370, label %318
+
+; <label>:318                                     ; preds = %308
+  %319 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %320 = extractvalue %dx.types.CBufRet.f32 %319, 3
+  %321 = fcmp fast ult float %38, %320
+  br i1 %321, label %322, label %370
+
+; <label>:322                                     ; preds = %318
+  %323 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %324 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %323, i32 0, i32 %39, i32 %10, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %325 = extractvalue %dx.types.ResRet.i32 %324, 0
+  %326 = lshr i32 %325, 27
+  %327 = add nsw i32 %326, -31
+  %328 = sitofp i32 %327 to float
+  %329 = call float @dx.op.unary.f32(i32 21, float %328)  ; Exp(value)
+  %330 = fmul fast float %329, 3.906250e-03
+  %331 = and i32 %325, 255
+  %332 = uitofp i32 %331 to float
+  %333 = lshr i32 %325, 9
+  %334 = and i32 %333, 255
+  %335 = uitofp i32 %334 to float
+  %336 = lshr i32 %325, 18
+  %337 = and i32 %336, 255
+  %338 = uitofp i32 %337 to float
+  %339 = fmul fast float %332, %330
+  %340 = fmul fast float %335, %330
+  %341 = fmul fast float %338, %330
+  %342 = and i32 %325, 256
+  %343 = icmp ne i32 %342, 0
+  %344 = select i1 %343, float -1.000000e+00, float 1.000000e+00
+  %345 = fmul fast float %339, %344
+  %346 = and i32 %325, 131072
+  %347 = icmp ne i32 %346, 0
+  %348 = select i1 %347, float -1.000000e+00, float 1.000000e+00
+  %349 = fmul fast float %340, %348
+  %350 = and i32 %325, 67108864
+  %351 = icmp ne i32 %350, 0
+  %352 = select i1 %351, float -1.000000e+00, float 1.000000e+00
+  %353 = fmul fast float %341, %352
+  %354 = fsub fast float %345, %353
+  %355 = fmul fast float %354, 5.000000e-01
+  %356 = fadd fast float %355, %353
+  %357 = fsub fast float %349, %356
+  %358 = fmul fast float %357, 5.000000e-01
+  %359 = fadd fast float %358, %356
+  %360 = fadd fast float %359, %309
+  %361 = fadd fast float %354, %310
+  %362 = fadd fast float %357, %311
+  %363 = fmul fast float %359, %359
+  %364 = fmul fast float %354, %354
+  %365 = fmul fast float %357, %357
+  %366 = fadd fast float %363, %312
+  %367 = fadd fast float %364, %313
+  %368 = fadd fast float %365, %314
+  %369 = fadd fast float %315, 1.000000e+00
+  br label %370
+
+; <label>:370                                     ; preds = %322, %318, %308
+  %371 = phi float [ %360, %322 ], [ %309, %308 ], [ %309, %318 ]
+  %372 = phi float [ %361, %322 ], [ %310, %308 ], [ %310, %318 ]
+  %373 = phi float [ %362, %322 ], [ %311, %308 ], [ %311, %318 ]
+  %374 = phi float [ %366, %322 ], [ %312, %308 ], [ %312, %318 ]
+  %375 = phi float [ %367, %322 ], [ %313, %308 ], [ %313, %318 ]
+  %376 = phi float [ %368, %322 ], [ %314, %308 ], [ %314, %318 ]
+  %377 = phi float [ %369, %322 ], [ %315, %308 ], [ %315, %318 ]
+  %378 = or i1 %190, %316
+  br i1 %378, label %431, label %379
+
+; <label>:379                                     ; preds = %370
+  %380 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %381 = extractvalue %dx.types.CBufRet.f32 %380, 3
+  %382 = fcmp fast ult float %38, %381
+  br i1 %382, label %383, label %431
+
+; <label>:383                                     ; preds = %379
+  %384 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %385 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %384, i32 0, i32 %9, i32 %10, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %386 = extractvalue %dx.types.ResRet.i32 %385, 0
+  %387 = lshr i32 %386, 27
+  %388 = add nsw i32 %387, -31
+  %389 = sitofp i32 %388 to float
+  %390 = call float @dx.op.unary.f32(i32 21, float %389)  ; Exp(value)
+  %391 = fmul fast float %390, 3.906250e-03
+  %392 = and i32 %386, 255
+  %393 = uitofp i32 %392 to float
+  %394 = lshr i32 %386, 9
+  %395 = and i32 %394, 255
+  %396 = uitofp i32 %395 to float
+  %397 = lshr i32 %386, 18
+  %398 = and i32 %397, 255
+  %399 = uitofp i32 %398 to float
+  %400 = fmul fast float %393, %391
+  %401 = fmul fast float %396, %391
+  %402 = fmul fast float %399, %391
+  %403 = and i32 %386, 256
+  %404 = icmp ne i32 %403, 0
+  %405 = select i1 %404, float -1.000000e+00, float 1.000000e+00
+  %406 = fmul fast float %400, %405
+  %407 = and i32 %386, 131072
+  %408 = icmp ne i32 %407, 0
+  %409 = select i1 %408, float -1.000000e+00, float 1.000000e+00
+  %410 = fmul fast float %401, %409
+  %411 = and i32 %386, 67108864
+  %412 = icmp ne i32 %411, 0
+  %413 = select i1 %412, float -1.000000e+00, float 1.000000e+00
+  %414 = fmul fast float %402, %413
+  %415 = fsub fast float %406, %414
+  %416 = fmul fast float %415, 5.000000e-01
+  %417 = fadd fast float %416, %414
+  %418 = fsub fast float %410, %417
+  %419 = fmul fast float %418, 5.000000e-01
+  %420 = fadd fast float %419, %417
+  %421 = fadd fast float %420, %371
+  %422 = fadd fast float %415, %372
+  %423 = fadd fast float %418, %373
+  %424 = fmul fast float %420, %420
+  %425 = fmul fast float %415, %415
+  %426 = fmul fast float %418, %418
+  %427 = fadd fast float %424, %374
+  %428 = fadd fast float %425, %375
+  %429 = fadd fast float %426, %376
+  %430 = fadd fast float %377, 1.000000e+00
+  br label %431
+
+; <label>:431                                     ; preds = %383, %379, %370
+  %432 = phi float [ %421, %383 ], [ %371, %370 ], [ %371, %379 ]
+  %433 = phi float [ %422, %383 ], [ %372, %370 ], [ %372, %379 ]
+  %434 = phi float [ %423, %383 ], [ %373, %370 ], [ %373, %379 ]
+  %435 = phi float [ %427, %383 ], [ %374, %370 ], [ %374, %379 ]
+  %436 = phi float [ %428, %383 ], [ %375, %370 ], [ %375, %379 ]
+  %437 = phi float [ %429, %383 ], [ %376, %370 ], [ %376, %379 ]
+  %438 = phi float [ %430, %383 ], [ %377, %370 ], [ %377, %379 ]
+  %439 = or i1 %254, %316
+  br i1 %439, label %492, label %440
+
+; <label>:440                                     ; preds = %431
+  %441 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %442 = extractvalue %dx.types.CBufRet.f32 %441, 3
+  %443 = fcmp fast ult float %38, %442
+  br i1 %443, label %444, label %492
+
+; <label>:444                                     ; preds = %440
+  %445 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %446 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %445, i32 0, i32 %252, i32 %10, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %447 = extractvalue %dx.types.ResRet.i32 %446, 0
+  %448 = lshr i32 %447, 27
+  %449 = add nsw i32 %448, -31
+  %450 = sitofp i32 %449 to float
+  %451 = call float @dx.op.unary.f32(i32 21, float %450)  ; Exp(value)
+  %452 = fmul fast float %451, 3.906250e-03
+  %453 = and i32 %447, 255
+  %454 = uitofp i32 %453 to float
+  %455 = lshr i32 %447, 9
+  %456 = and i32 %455, 255
+  %457 = uitofp i32 %456 to float
+  %458 = lshr i32 %447, 18
+  %459 = and i32 %458, 255
+  %460 = uitofp i32 %459 to float
+  %461 = fmul fast float %454, %452
+  %462 = fmul fast float %457, %452
+  %463 = fmul fast float %460, %452
+  %464 = and i32 %447, 256
+  %465 = icmp ne i32 %464, 0
+  %466 = select i1 %465, float -1.000000e+00, float 1.000000e+00
+  %467 = fmul fast float %461, %466
+  %468 = and i32 %447, 131072
+  %469 = icmp ne i32 %468, 0
+  %470 = select i1 %469, float -1.000000e+00, float 1.000000e+00
+  %471 = fmul fast float %462, %470
+  %472 = and i32 %447, 67108864
+  %473 = icmp ne i32 %472, 0
+  %474 = select i1 %473, float -1.000000e+00, float 1.000000e+00
+  %475 = fmul fast float %463, %474
+  %476 = fsub fast float %467, %475
+  %477 = fmul fast float %476, 5.000000e-01
+  %478 = fadd fast float %477, %475
+  %479 = fsub fast float %471, %478
+  %480 = fmul fast float %479, 5.000000e-01
+  %481 = fadd fast float %480, %478
+  %482 = fadd fast float %481, %432
+  %483 = fadd fast float %476, %433
+  %484 = fadd fast float %479, %434
+  %485 = fmul fast float %481, %481
+  %486 = fmul fast float %476, %476
+  %487 = fmul fast float %479, %479
+  %488 = fadd fast float %485, %435
+  %489 = fadd fast float %486, %436
+  %490 = fadd fast float %487, %437
+  %491 = fadd fast float %438, 1.000000e+00
+  br label %492
+
+; <label>:492                                     ; preds = %444, %440, %431
+  %493 = phi float [ %482, %444 ], [ %432, %431 ], [ %432, %440 ]
+  %494 = phi float [ %483, %444 ], [ %433, %431 ], [ %433, %440 ]
+  %495 = phi float [ %484, %444 ], [ %434, %431 ], [ %434, %440 ]
+  %496 = phi float [ %488, %444 ], [ %435, %431 ], [ %435, %440 ]
+  %497 = phi float [ %489, %444 ], [ %436, %431 ], [ %436, %440 ]
+  %498 = phi float [ %490, %444 ], [ %437, %431 ], [ %437, %440 ]
+  %499 = phi float [ %491, %444 ], [ %438, %431 ], [ %438, %440 ]
+  %500 = add i32 %10, 1
+  %501 = uitofp i32 %500 to float
+  %502 = fcmp fast oge float %501, %20
+  %503 = or i1 %42, %502
+  br i1 %503, label %556, label %504
+
+; <label>:504                                     ; preds = %492
+  %505 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %506 = extractvalue %dx.types.CBufRet.f32 %505, 3
+  %507 = fcmp fast ult float %38, %506
+  br i1 %507, label %508, label %556
+
+; <label>:508                                     ; preds = %504
+  %509 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %510 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %509, i32 0, i32 %39, i32 %500, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %511 = extractvalue %dx.types.ResRet.i32 %510, 0
+  %512 = lshr i32 %511, 27
+  %513 = add nsw i32 %512, -31
+  %514 = sitofp i32 %513 to float
+  %515 = call float @dx.op.unary.f32(i32 21, float %514)  ; Exp(value)
+  %516 = fmul fast float %515, 3.906250e-03
+  %517 = and i32 %511, 255
+  %518 = uitofp i32 %517 to float
+  %519 = lshr i32 %511, 9
+  %520 = and i32 %519, 255
+  %521 = uitofp i32 %520 to float
+  %522 = lshr i32 %511, 18
+  %523 = and i32 %522, 255
+  %524 = uitofp i32 %523 to float
+  %525 = fmul fast float %518, %516
+  %526 = fmul fast float %521, %516
+  %527 = fmul fast float %524, %516
+  %528 = and i32 %511, 256
+  %529 = icmp ne i32 %528, 0
+  %530 = select i1 %529, float -1.000000e+00, float 1.000000e+00
+  %531 = fmul fast float %525, %530
+  %532 = and i32 %511, 131072
+  %533 = icmp ne i32 %532, 0
+  %534 = select i1 %533, float -1.000000e+00, float 1.000000e+00
+  %535 = fmul fast float %526, %534
+  %536 = and i32 %511, 67108864
+  %537 = icmp ne i32 %536, 0
+  %538 = select i1 %537, float -1.000000e+00, float 1.000000e+00
+  %539 = fmul fast float %527, %538
+  %540 = fsub fast float %531, %539
+  %541 = fmul fast float %540, 5.000000e-01
+  %542 = fadd fast float %541, %539
+  %543 = fsub fast float %535, %542
+  %544 = fmul fast float %543, 5.000000e-01
+  %545 = fadd fast float %544, %542
+  %546 = fadd fast float %545, %493
+  %547 = fadd fast float %540, %494
+  %548 = fadd fast float %543, %495
+  %549 = fmul fast float %545, %545
+  %550 = fmul fast float %540, %540
+  %551 = fmul fast float %543, %543
+  %552 = fadd fast float %549, %496
+  %553 = fadd fast float %550, %497
+  %554 = fadd fast float %551, %498
+  %555 = fadd fast float %499, 1.000000e+00
+  br label %556
+
+; <label>:556                                     ; preds = %508, %504, %492
+  %557 = phi float [ %546, %508 ], [ %493, %492 ], [ %493, %504 ]
+  %558 = phi float [ %547, %508 ], [ %494, %492 ], [ %494, %504 ]
+  %559 = phi float [ %548, %508 ], [ %495, %492 ], [ %495, %504 ]
+  %560 = phi float [ %552, %508 ], [ %496, %492 ], [ %496, %504 ]
+  %561 = phi float [ %553, %508 ], [ %497, %492 ], [ %497, %504 ]
+  %562 = phi float [ %554, %508 ], [ %498, %492 ], [ %498, %504 ]
+  %563 = phi float [ %555, %508 ], [ %499, %492 ], [ %499, %504 ]
+  %564 = or i1 %190, %502
+  br i1 %564, label %617, label %565
+
+; <label>:565                                     ; preds = %556
+  %566 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %567 = extractvalue %dx.types.CBufRet.f32 %566, 3
+  %568 = fcmp fast ult float %38, %567
+  br i1 %568, label %569, label %617
+
+; <label>:569                                     ; preds = %565
+  %570 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %571 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %570, i32 0, i32 %9, i32 %500, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %572 = extractvalue %dx.types.ResRet.i32 %571, 0
+  %573 = lshr i32 %572, 27
+  %574 = add nsw i32 %573, -31
+  %575 = sitofp i32 %574 to float
+  %576 = call float @dx.op.unary.f32(i32 21, float %575)  ; Exp(value)
+  %577 = fmul fast float %576, 3.906250e-03
+  %578 = and i32 %572, 255
+  %579 = uitofp i32 %578 to float
+  %580 = lshr i32 %572, 9
+  %581 = and i32 %580, 255
+  %582 = uitofp i32 %581 to float
+  %583 = lshr i32 %572, 18
+  %584 = and i32 %583, 255
+  %585 = uitofp i32 %584 to float
+  %586 = fmul fast float %579, %577
+  %587 = fmul fast float %582, %577
+  %588 = fmul fast float %585, %577
+  %589 = and i32 %572, 256
+  %590 = icmp ne i32 %589, 0
+  %591 = select i1 %590, float -1.000000e+00, float 1.000000e+00
+  %592 = fmul fast float %586, %591
+  %593 = and i32 %572, 131072
+  %594 = icmp ne i32 %593, 0
+  %595 = select i1 %594, float -1.000000e+00, float 1.000000e+00
+  %596 = fmul fast float %587, %595
+  %597 = and i32 %572, 67108864
+  %598 = icmp ne i32 %597, 0
+  %599 = select i1 %598, float -1.000000e+00, float 1.000000e+00
+  %600 = fmul fast float %588, %599
+  %601 = fsub fast float %592, %600
+  %602 = fmul fast float %601, 5.000000e-01
+  %603 = fadd fast float %602, %600
+  %604 = fsub fast float %596, %603
+  %605 = fmul fast float %604, 5.000000e-01
+  %606 = fadd fast float %605, %603
+  %607 = fadd fast float %606, %557
+  %608 = fadd fast float %601, %558
+  %609 = fadd fast float %604, %559
+  %610 = fmul fast float %606, %606
+  %611 = fmul fast float %601, %601
+  %612 = fmul fast float %604, %604
+  %613 = fadd fast float %610, %560
+  %614 = fadd fast float %611, %561
+  %615 = fadd fast float %612, %562
+  %616 = fadd fast float %563, 1.000000e+00
+  br label %617
+
+; <label>:617                                     ; preds = %569, %565, %556
+  %618 = phi float [ %607, %569 ], [ %557, %556 ], [ %557, %565 ]
+  %619 = phi float [ %608, %569 ], [ %558, %556 ], [ %558, %565 ]
+  %620 = phi float [ %609, %569 ], [ %559, %556 ], [ %559, %565 ]
+  %621 = phi float [ %613, %569 ], [ %560, %556 ], [ %560, %565 ]
+  %622 = phi float [ %614, %569 ], [ %561, %556 ], [ %561, %565 ]
+  %623 = phi float [ %615, %569 ], [ %562, %556 ], [ %562, %565 ]
+  %624 = phi float [ %616, %569 ], [ %563, %556 ], [ %563, %565 ]
+  %625 = or i1 %254, %502
+  br i1 %625, label %678, label %626
+
+; <label>:626                                     ; preds = %617
+  %627 = call %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32 59, %dx.types.Handle %7, i32 11)  ; CBufferLoadLegacy(handle,regIndex)
+  %628 = extractvalue %dx.types.CBufRet.f32 %627, 3
+  %629 = fcmp fast ult float %38, %628
+  br i1 %629, label %630, label %678
+
+; <label>:630                                     ; preds = %626
+  %631 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %2, %dx.types.ResourceProperties { i32 2, i32 261 })  ; AnnotateHandle(res,props)  resource: Texture2D<U32>
+  %632 = call %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32 66, %dx.types.Handle %631, i32 0, i32 %252, i32 %500, i32 undef, i32 undef, i32 undef, i32 undef)  ; TextureLoad(srv,mipLevelOrSampleCount,coord0,coord1,coord2,offset0,offset1,offset2)
+  %633 = extractvalue %dx.types.ResRet.i32 %632, 0
+  %634 = lshr i32 %633, 27
+  %635 = add nsw i32 %634, -31
+  %636 = sitofp i32 %635 to float
+  %637 = call float @dx.op.unary.f32(i32 21, float %636)  ; Exp(value)
+  %638 = fmul fast float %637, 3.906250e-03
+  %639 = and i32 %633, 255
+  %640 = uitofp i32 %639 to float
+  %641 = lshr i32 %633, 9
+  %642 = and i32 %641, 255
+  %643 = uitofp i32 %642 to float
+  %644 = lshr i32 %633, 18
+  %645 = and i32 %644, 255
+  %646 = uitofp i32 %645 to float
+  %647 = fmul fast float %640, %638
+  %648 = fmul fast float %643, %638
+  %649 = fmul fast float %646, %638
+  %650 = and i32 %633, 256
+  %651 = icmp ne i32 %650, 0
+  %652 = select i1 %651, float -1.000000e+00, float 1.000000e+00
+  %653 = fmul fast float %647, %652
+  %654 = and i32 %633, 131072
+  %655 = icmp ne i32 %654, 0
+  %656 = select i1 %655, float -1.000000e+00, float 1.000000e+00
+  %657 = fmul fast float %648, %656
+  %658 = and i32 %633, 67108864
+  %659 = icmp ne i32 %658, 0
+  %660 = select i1 %659, float -1.000000e+00, float 1.000000e+00
+  %661 = fmul fast float %649, %660
+  %662 = fsub fast float %653, %661
+  %663 = fmul fast float %662, 5.000000e-01
+  %664 = fadd fast float %663, %661
+  %665 = fsub fast float %657, %664
+  %666 = fmul fast float %665, 5.000000e-01
+  %667 = fadd fast float %666, %664
+  %668 = fadd fast float %667, %618
+  %669 = fadd fast float %662, %619
+  %670 = fadd fast float %665, %620
+  %671 = fmul fast float %667, %667
+  %672 = fmul fast float %662, %662
+  %673 = fmul fast float %665, %665
+  %674 = fadd fast float %671, %621
+  %675 = fadd fast float %672, %622
+  %676 = fadd fast float %673, %623
+  %677 = fadd fast float %624, 1.000000e+00
+  br label %678
+
+; <label>:678                                     ; preds = %630, %626, %617
+  %679 = phi float [ %668, %630 ], [ %618, %617 ], [ %618, %626 ]
+  %680 = phi float [ %669, %630 ], [ %619, %617 ], [ %619, %626 ]
+  %681 = phi float [ %670, %630 ], [ %620, %617 ], [ %620, %626 ]
+  %682 = phi float [ %674, %630 ], [ %621, %617 ], [ %621, %626 ]
+  %683 = phi float [ %675, %630 ], [ %622, %617 ], [ %622, %626 ]
+  %684 = phi float [ %676, %630 ], [ %623, %617 ], [ %623, %626 ]
+  %685 = phi float [ %677, %630 ], [ %624, %617 ], [ %624, %626 ]
+  %686 = call float @dx.op.binary.f32(i32 35, float 0x3F1A36E2E0000000, float %685)  ; FMax(a,b)
+  %687 = fdiv fast float %679, %686
+  %688 = fdiv fast float %680, %686
+  %689 = fdiv fast float %681, %686
+  %690 = call float @dx.op.binary.f32(i32 35, float %686, float 2.000000e+00)  ; FMax(a,b)
+  %691 = fadd fast float %690, -1.000000e+00
+  %692 = fdiv fast float %686, %691
+  %693 = fdiv fast float %682, %686
+  %694 = fdiv fast float %683, %686
+  %695 = fdiv fast float %684, %686
+  %696 = fmul fast float %687, %687
+  %697 = fmul fast float %688, %688
+  %698 = fmul fast float %689, %689
+  %699 = fsub fast float %693, %696
+  %700 = fsub fast float %694, %697
+  %701 = fsub fast float %695, %698
+  %702 = fmul fast float %699, %692
+  %703 = fmul fast float %700, %692
+  %704 = fmul fast float %701, %692
+  %705 = call float @dx.op.unary.f32(i32 24, float %702)  ; Sqrt(value)
+  %706 = call float @dx.op.unary.f32(i32 24, float %703)  ; Sqrt(value)
+  %707 = call float @dx.op.unary.f32(i32 24, float %704)  ; Sqrt(value)
+  %708 = call float @dx.op.binary.f32(i32 35, float %687, float -1.000000e+00)  ; FMax(a,b)
+  %709 = call float @dx.op.binary.f32(i32 35, float %688, float -1.000000e+00)  ; FMax(a,b)
+  %710 = call float @dx.op.binary.f32(i32 35, float %689, float -1.000000e+00)  ; FMax(a,b)
+  %711 = call float @dx.op.binary.f32(i32 36, float %708, float 1.000000e+00)  ; FMin(a,b)
+  %712 = call float @dx.op.binary.f32(i32 36, float %709, float 1.000000e+00)  ; FMin(a,b)
+  %713 = call float @dx.op.binary.f32(i32 36, float %710, float 1.000000e+00)  ; FMin(a,b)
+  %714 = call float @dx.op.unary.f32(i32 6, float %711)  ; FAbs(value)
+  %715 = call float @dx.op.unary.f32(i32 6, float %712)  ; FAbs(value)
+  %716 = call float @dx.op.unary.f32(i32 6, float %713)  ; FAbs(value)
+  %717 = call float @dx.op.binary.f32(i32 35, float %714, float %715)  ; FMax(a,b)
+  %718 = call float @dx.op.binary.f32(i32 35, float %717, float %716)  ; FMax(a,b)
+  %719 = fcmp fast oeq float %718, 0.000000e+00
+  br i1 %719, label %83, label %46
+}
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.threadId.i32(i32, i32) #0
+
+; Function Attrs: nounwind readonly
+declare %dx.types.ResRet.i32 @dx.op.textureLoad.i32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32) #1
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.unary.f32(i32, float) #0
+
+; Function Attrs: nounwind readnone
+declare float @dx.op.binary.f32(i32, float, float) #0
+
+; Function Attrs: nounwind
+declare void @dx.op.textureStore.i32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32, i8) #2
+
+; Function Attrs: nounwind readonly
+declare %dx.types.ResRet.f32 @dx.op.textureLoad.f32(i32, %dx.types.Handle, i32, i32, i32, i32, i32, i32, i32) #1
+
+; Function Attrs: nounwind readnone
+declare i32 @dx.op.binary.i32(i32, i32, i32) #0
+
+; Function Attrs: nounwind readonly
+declare %dx.types.CBufRet.f32 @dx.op.cbufferLoadLegacy.f32(i32, %dx.types.Handle, i32) #1
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.annotateHandle(i32, %dx.types.Handle, %dx.types.ResourceProperties) #0
+
+; Function Attrs: nounwind readnone
+declare %dx.types.Handle @dx.op.createHandleFromBinding(i32, %dx.types.ResBind, i32, i1) #0
+
+attributes #0 = { nounwind readnone }
+attributes #1 = { nounwind readonly }
+attributes #2 = { nounwind }
+
+!llvm.ident = !{!0}
+!dx.version = !{!1}
+!dx.valver = !{!2}
+!dx.shaderModel = !{!3}
+!dx.resources = !{!4}
+!dx.entryPoints = !{!16}
+
+!0 = !{!"clang version 3.7 (tags/RELEASE_370/final)"}
+!1 = !{i32 1, i32 6}
+!2 = !{i32 1, i32 7}
+!3 = !{!"cs", i32 6, i32 6}
+!4 = !{!5, !11, !13, null}
+!5 = !{!6, !8, !9}
+!6 = !{i32 0, %"class.Texture2D<vector<float, 4> >"* undef, !"", i32 0, i32 0, i32 1, i32 2, i32 0, !7}
+!7 = !{i32 0, i32 9}
+!8 = !{i32 1, %"class.Texture2D<vector<float, 4> >"* undef, !"", i32 0, i32 1, i32 1, i32 2, i32 0, !7}
+!9 = !{i32 2, %"class.Texture2D<unsigned int>"* undef, !"", i32 0, i32 2, i32 1, i32 2, i32 0, !10}
+!10 = !{i32 0, i32 5}
+!11 = !{!12}
+!12 = !{i32 0, %"class.RWTexture2D<vector<unsigned int, 2> >"* undef, !"", i32 0, i32 0, i32 1, i32 2, i1 false, i1 false, i1 false, !10}
+!13 = !{!14, !15}
+!14 = !{i32 0, %SceneInfo* undef, !"", i32 0, i32 0, i32 1, i32 528, null}
+!15 = !{i32 1, %RayTracingDenoiserConstantBufferInfo* undef, !"", i32 0, i32 1, i32 1, i32 288, null}
+!16 = !{void ()* @rayTracingMeanVariance_main, !"rayTracingMeanVariance_main", null, !4, !17}
+!17 = !{i32 0, i64 8388864, i32 4, !18, i32 5, !19}
+!18 = !{i32 8, i32 8, i32 1}
+!19 = !{i32 0}
+
