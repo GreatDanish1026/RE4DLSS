@@ -582,25 +582,37 @@ bool ReadFsrConstants(device* dev, const StageState& st, uint32_t* out, std::str
 // texture rayTracingUpscale reads. At FSR 2's accumulate, guides are made from the G-buffer that
 // rayTracingUpscale reads, and DLSS-D runs in place of DLSS.
 
-// The game's ray tracing passes: the reflections-only form of RE2/RE3/RE7's chain (one specular
-// signal), matched by structure from docs/captures/RE4DLSS-frame-1.txt (RE7 id in brackets).
-constexpr uint32_t kRtShadeDiffuse = 8;              // (no ray-traced diffuse in RE4)
-constexpr uint32_t kRtShadeSpecular = 0x3dd76aeb;    // rayTracingShading: u0 specular (ec2602f1)
-constexpr uint32_t kRtShadeVfx = 4;                  // (RE2 only)
-constexpr uint32_t kRtSpatialDiffuse = 9;            // (no ray-traced diffuse in RE4)
-constexpr uint32_t kRtSpatialSpecular = 0x567f11a3;  // rayTracingSpatialAccumulation: u0 specular (2712f710)
-constexpr uint32_t kRtSpatialVfx = 5;                // (RE2 only)
-constexpr uint32_t kRtVfxMedian = 6;                 // (RE2 only)
-constexpr uint32_t kRtMeanVariance = 0x200f44e3;     // rayTracingMeanVariance (81dbf3d7)
+// The game's ray tracing passes, matched by structure (RE7 id in brackets). Out of the box RE4
+// ray traces only reflections: the reflections-only form of RE2/RE3/RE7's chain, one specular
+// signal (docs/captures/RE4DLSS-frame-1.txt). With ray traced GI switched on (the game has it but
+// its menu doesn't offer it; the "RE4R Graphics Enhancement" REFramework mod turns it on), the
+// full chain runs as in RE7, at the render size: diffuse (shY, cocg) and specular, and different
+// builds of the specular shading and of rayTracingUpscale (capture 2026-11-11, docs/FINDINGS.md).
+constexpr uint32_t kRtShadeDiffuse = 0x7c15324c;      // rayTracingShading: u0 shY, u1 cocg (56c0dfe3; with GI)
+constexpr uint32_t kRtShadeSpecular = 0x3dd76aeb;     // rayTracingShading: u0 specular (ec2602f1)
+constexpr uint32_t kRtShadeSpecularGi = 0xec28014a;   // the same with GI on
+constexpr uint32_t kRtShadeVfx = 4;                   // (RE2 only)
+constexpr uint32_t kRtSpatialDiffuse = 0x0b464977;    // rayTracingSpatialAccumulation: u0 shY, u1 cocg (17e695da; with GI)
+constexpr uint32_t kRtSpatialSpecular = 0x567f11a3;   // rayTracingSpatialAccumulation: u0 specular (2712f710)
+constexpr uint32_t kRtSpatialVfx = 5;                 // (RE2 only)
+constexpr uint32_t kRtVfxMedian = 6;                  // (RE2 only)
+constexpr uint32_t kRtMeanVariance = 0x200f44e3;      // rayTracingMeanVariance (81dbf3d7)
 constexpr uint32_t kRtTemporalSpecular = 0xfc8ea1ae;  // rayTracingTemporalAccumulation, specular (38fb0c41)
-constexpr uint32_t kRtTemporalDiffuse = 10;           // (no ray-traced diffuse in RE4)
+constexpr uint32_t kRtTemporalDiffuse = 0x111075a0;   // rayTracingTemporalAccumulation, diffuse (9de23583; with GI)
 constexpr uint32_t kRtDeflicker = 0xe1d94131;         // rayTracingDeflickerSpecular (387ae12e)
 constexpr uint32_t kRtBilateral = 0xb38899cf;         // rayTracingBilateralFilter (3f14ab68)
 constexpr uint32_t kRtTemporalVfx = 7;                // (RE2 only)
 constexpr uint32_t kRtUpscale = 0x4c66de88;           // rayTracingUpscale: t3 base colour, t4 normal, t7 specular (ba99f22d)
-constexpr uint32_t kUpBase = 3, kUpNormal = 4, kUpSignal = 7;  // t7 specular
-constexpr uint32_t kRtSignals = 1;
-constexpr int kSpecularSlot = 0;  // signal[] index of the specular signal
+constexpr uint32_t kRtUpscaleGi = 0xe0f541ce;         // with GI: t3 base, t4 normal, t6 shY, t7 cocg, t8 specular
+constexpr uint32_t kUpBase = 3, kUpNormal = 4;
+// signal[] slots, as in RE7DLSS: shY, cocg, specular. Which rayTracingUpscale reads, from which t:
+struct UpscaleSignal {
+    int slot;
+    uint32_t reg;
+};
+constexpr UpscaleSignal kUpSignalsReflections[] = {{2, 7}};
+constexpr UpscaleSignal kUpSignalsGi[] = {{0, 6}, {1, 7}, {2, 8}};
+constexpr int kSpecularSlot = 2;
 constexpr int kViewProj = 0;       // SceneInfo: row_major viewProjMat, byte 0
 
 const char* const kRrDenoiseNames[] = {"Game's denoiser, Ray Reconstruction on top (recommended)",
@@ -746,7 +758,7 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
     };
     switch (id) {
         case kRtShadeDiffuse: if (raw) note(0, ComputeView(dev, s.compute, 0, true)), note(1, ComputeView(dev, s.compute, 1, true)); break;
-        case kRtShadeSpecular: if (raw) note(kSpecularSlot, ComputeView(dev, s.compute, 0, true)); break;
+        case kRtShadeSpecular: case kRtShadeSpecularGi: if (raw) note(kSpecularSlot, ComputeView(dev, s.compute, 0, true)); break;
         case kRtShadeVfx: if (raw) note(3, ComputeView(dev, s.compute, 0, true)); break;
         case kRtSpatialDiffuse: if (!raw) note(0, ComputeView(dev, s.compute, 0, true)), note(1, ComputeView(dev, s.compute, 1, true)); break;
         case kRtSpatialSpecular: if (!raw) note(kSpecularSlot, ComputeView(dev, s.compute, 0, true)); break;
@@ -754,7 +766,15 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
         default: break;
     }
     const bool skipping = RtSkipping(frame);
-    if (id == kRtUpscale) {
+    if (id == kRtUpscale || id == kRtUpscaleGi) {
+        const bool gi = id == kRtUpscaleGi;
+        const UpscaleSignal* sig = gi ? kUpSignalsGi : kUpSignalsReflections;
+        const uint32_t sigCount = gi ? 3 : 1;
+        static int lastForm = -1;
+        if (lastForm != (gi ? 1 : 0)) {
+            lastForm = gi ? 1 : 0;
+            Log("Ray Reconstruction: the game ray traces %s", gi ? "GI and reflections" : "reflections");
+        }
         g_rt.upscaleFrame = frame;
         g_rt.base = ComputeView(dev, s.compute, kUpBase, false);
         g_rt.normal = ComputeView(dev, s.compute, kUpNormal, false);
@@ -771,13 +791,13 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
         }
         if (skipping && g_rt.signalFrame == frame) {
             int copied = 0;
-            for (uint32_t i = 0; i < kRtSignals; ++i) {
-                const resource dst = ComputeView(dev, s.compute, kUpSignal + i, false);
+            for (uint32_t i = 0; i < sigCount; ++i) {
+                const resource dst = ComputeView(dev, s.compute, sig[i].reg, false);
                 RtWatch(dst);
-                copied += RtCopy(cl, g_rt.signal[i], dst);
+                copied += RtCopy(cl, g_rt.signal[sig[i].slot], dst);
             }
             if (copied && !g_rt.copied++)
-                Log("Ray Reconstruction: %d of %u ray tracing signals handed over un-denoised", copied, kRtSignals);
+                Log("Ray Reconstruction: %d of %u ray tracing signals handed over un-denoised", copied, sigCount);
         }
         return false;
     }
