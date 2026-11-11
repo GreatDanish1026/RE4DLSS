@@ -207,6 +207,12 @@ float g_lastScene[kSceneInfoBytes / 4];
 bool g_lastSceneValid = false;
 uint64_t g_scenesFound = 0;
 constexpr uint32_t kScreenSizeFloat = 92;  // byte 368
+// While the game ray traces, rayTracingUpscale's b0 is SceneInfo, read once a frame there (Ray
+// Reconstruction section): frame generation takes its camera from that instead of the search,
+// which maps every constant buffer the game binds and cost a lot of CPU time with many draws
+// (1.3.1 with the RE4R Graphics Enhancement script: 70 fps without frame generation, 40 with it,
+// GPU at 40%). Present count when it was last read.
+std::atomic<uint64_t> g_rtSceneSeen{UINT64_MAX};
 
 ListState* State(command_list* cl) { return cl->get_private_data<ListState>(); }
 
@@ -440,8 +446,11 @@ void OnPushDescriptors(command_list* cl, shader_stage stages, pipeline_layout la
     if (u.type == descriptor_type::constant_buffer || u.type == descriptor_type::buffer_shader_resource_view ||
         u.type == descriptor_type::buffer_unordered_access_view)
         st->roots[param] = {stages, u.type, *static_cast<const buffer_range*>(u.descriptors)};
-    if (u.type == descriptor_type::constant_buffer && FrameGenWantsCamera())
-        CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
+    if (u.type == descriptor_type::constant_buffer && FrameGenWantsCamera()) {
+        const uint64_t seen = g_rtSceneSeen.load(std::memory_order_relaxed);
+        if (seen == UINT64_MAX || seen + 30 < g_presents.load(std::memory_order_relaxed))  // not ray tracing: search
+            CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
+    }
 }
 
 void OnPushConstants(command_list* cl, shader_stage stages, pipeline_layout layout, uint32_t param, uint32_t first,
@@ -743,10 +752,20 @@ bool RtCopy(command_list* cl, resource src, resource dst) {
 // Every compute dispatch: notes the signals and the G-buffer, skips the game's denoise passes, and
 // copies the signals in before rayTracingUpscale. True: the dispatch is skipped.
 bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
-    if (!g_set.rr || !g_set.enabled) return false;
+    const bool upscalePass = id == kRtUpscale || id == kRtUpscaleGi;
+    const bool rr = g_set.rr && g_set.enabled;
+    if (!rr && !(upscalePass && FrameGenWantsCamera())) return false;
     device* dev = cl->get_device();
     const uint64_t frame = g_presents.load();
     std::lock_guard<std::mutex> lock(g_rtMutex);
+    if (!rr) {  // frame generation only: just the camera
+        std::string how;
+        if (g_rt.sceneFrame != frame && ReadCb0(dev, s.compute, kSceneInfoBytes, g_rt.scene, &how)) {
+            g_rt.sceneFrame = frame;
+            if (g_rt.scene[kScreenSizeFloat] == static_cast<float>(g_sceneW.load()) && g_rt.scene[kScreenSizeFloat + 1] == static_cast<float>(g_sceneH.load())) g_rtSceneSeen = frame;  // usable by frame generation
+        }
+        return false;
+    }
     const bool raw = g_set.rrDenoise == 2;
     auto note = [&](int slot, resource r) {
         if (g_rt.signalFrame != frame) {
@@ -784,6 +803,7 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
             std::string how;
             if (ReadCb0(dev, s.compute, kSceneInfoBytes, g_rt.scene, &how)) {
                 g_rt.sceneFrame = frame;
+                if (g_rt.scene[kScreenSizeFloat] == static_cast<float>(g_sceneW.load()) && g_rt.scene[kScreenSizeFloat + 1] == static_cast<float>(g_sceneH.load())) g_rtSceneSeen = frame;  // usable by frame generation
             } else if (how != g_rt.sceneHow) {
                 Log("Ray Reconstruction: camera (SceneInfo) not readable: %s", how.c_str());
                 g_rt.sceneHow = how;
@@ -1346,7 +1366,21 @@ void GiveFrameGen(command_list* cl, ListState& s) {
     memcpy(f, cb, sizeof(f));
     const uint32_t rw = cb[kRenderSize], rh = cb[kRenderSize + 1];
     g_sceneW = rw, g_sceneH = rh;  // what SceneInfo must say from now on
-    if (s.sceneValid) {
+    bool fromRt = false;
+    {
+        // This frame's camera from rayTracingUpscale (it runs before FSR 2), when its size matches.
+        static float rtScene[kSceneInfoBytes / 4];
+        std::lock_guard<std::mutex> lock(g_rtMutex);
+        if (g_rt.sceneFrame == g_presents.load() && g_rt.scene[kScreenSizeFloat] == static_cast<float>(rw) &&
+            g_rt.scene[kScreenSizeFloat + 1] == static_cast<float>(rh)) {
+            memcpy(rtScene, g_rt.scene, sizeof(rtScene));
+            fromRt = true;
+        }
+        if (fromRt) FrameGenSetSceneInfo(rtScene);
+    }
+    if (fromRt) {
+        // camera given above
+    } else if (s.sceneValid) {
         FrameGenSetSceneInfo(s.scene);
     } else {
         std::lock_guard<std::mutex> lock(g_sceneMutex);
