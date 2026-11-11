@@ -87,3 +87,27 @@ camera isn't usable, the last good one is used for up to 60 frames.
 Test (2026-11-09, 4K, ray tracing on): RR at Quality (2560x1440 and 2258x1270) and Ultra
 Performance (1280x720), steady, GPU fully used with RR on (fps fine), on/off switching clean; Super
 Resolution while the game doesn't ray trace (a cutscene or menu stretch).
+
+## Ray Reconstruction with ray-traced GI (1.3.1, 2026-11-11)
+
+The game has ray-traced GI, AO and shadows that its menu doesn't offer; the "RE4R Graphics
+Enhancement" REFramework script turns them on (via.render.RenderConfig RayTracingGIEnable etc.,
+user settings rt_gi_enable, rtao, rt_shadow_enable, rt_quality 4). With GI on, RE4DLSS 1.3.0 never
+saw its rayTracingUpscale build and logged "the game isn't ray tracing". Capture
+(docs/captures/gi, Balanced 2258x1270): the full RE7-style chain, everything at the render size:
+
+| pass | reflections only | with GI |
+|---|---|---|
+| shading, diffuse (u0 shY r32uint, u1 cocg rgba16f) | - | cs7c15324c |
+| shading, specular (u0 specular r32uint) | cs3dd76aeb | csec28014a |
+| spatial, specular | cs567f11a3 | cs567f11a3 |
+| spatial, diffuse (t1 shY, t2 cocg -> u0, u1) | - | cs0b464977 |
+| deflicker, mean variance, temporal specular | cse1d94131, cs200f44e3, csfc8ea1ae | same |
+| temporal, diffuse (-> u0 shY, u1 cocg) | - | cs111075a0 |
+| bilateral (u0 shY, u1 cocg, u2 specular) | csb38899cf | csb38899cf |
+| rayTracingUpscale | cs4c66de88: t3 base, t4 normal, t7 specular | cse0f541ce: t3 base, t4 normal, t6 shY, t7 cocg, t8 specular |
+
+csaf14a17d (ray generation), cs5fa14dc9 and csbd6b1ff6 (buffer reductions after the temporal
+passes) are left alone. 1.3.1 knows both forms: signal slots as in RE7DLSS (shY, cocg, specular),
+the upscale build picks which are copied. RE4R RELighting only changes lights (no effect on the
+chain). Tested: RR runs with GI ("looks good"), on/off and model changes fine.

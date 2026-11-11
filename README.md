@@ -1,4 +1,4 @@
-# RE4DLSS 1.3.0
+# RE4DLSS 1.3.1
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -39,14 +39,16 @@ support, and REFramework for the render resolution dropdown.
   game's denoiser and hand Ray Reconstruction the reflection rays directly, for testing (the game
   traces below the render size, so that looks blotchier), and shows the surface pictures Ray
   Reconstruction gets (colour, reflectivity, normals, roughness). Without ray tracing (menus, some
-  cutscenes, or ray tracing off) it uses Super Resolution.
+  cutscenes, or ray tracing off) it uses Super Resolution. Also works when a mod turns on the
+  game's hidden ray-traced global illumination (such as the RE4R Graphics Enhancement REFramework
+  script): Ray Reconstruction then gets the GI as well as the reflections.
 
 Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShade.ini` under
 `[RE4DLSS]`.
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.3.0.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.3.1.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
@@ -76,7 +78,8 @@ If the NVIDIA App has a DLSS model override for the game, it takes precedence ov
 ## Notes
 
 - Tested at 3840x2160 on an NVIDIA RTX card at every FSR 2 quality, and with DLSS frame
-  generation 2x; Ray Reconstruction at Quality and Ultra Performance with ray tracing on.
+  generation 2x; Ray Reconstruction at Quality and Ultra Performance with ray tracing on, and with
+  the RE4R Graphics Enhancement and RE4R RELighting scripts (ray-traced GI, AO and shadows on).
 - Works with REFramework: REFramework hooks NVIDIA's frame generation DLL in a way that would hang
   the game at launch; the add-on steps around that hook while the game's swapchain is created.
 - Frame generation gets the picture without the HUD, so the HUD doesn't warp.
