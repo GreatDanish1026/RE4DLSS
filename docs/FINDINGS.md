@@ -111,3 +111,15 @@ csaf14a17d (ray generation), cs5fa14dc9 and csbd6b1ff6 (buffer reductions after 
 passes) are left alone. 1.3.1 knows both forms: signal slots as in RE7DLSS (shY, cocg, specular),
 the upscale build picks which are copied. RE4R RELighting only changes lights (no effect on the
 chain). Tested: RR runs with GI ("looks good"), on/off and model changes fine.
+
+## Frame generation CPU cost with many draws (1.3.2, 2026-11-11)
+
+With the RE4R Graphics Enhancement script (ray-traced GI, AO, shadows): about 70 fps at 100% GPU
+without frame generation, about 40 fps at 40% GPU with it (log: about 37 real frames a second).
+Frame generation's camera came from the SceneInfo search (CheckSceneInfo: every root CBV pushed,
+once per range per list, mapped and checked for SceneInfo at the render size); the script's
+extra draws made that CPU-bound, as Ray Reconstruction was before 1.3.0. While the game ray
+traces, rayTracingUpscale's b0 is SceneInfo (read once a frame since 1.3.0 for Ray
+Reconstruction): frame generation now takes it from there (also with Ray Reconstruction off), and
+the search only runs when that camera is missing for 30 frames or doesn't match the render size.
+Tested: fps and GPU usage back to normal with frame generation 2x ("looks good now").

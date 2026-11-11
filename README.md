@@ -1,4 +1,4 @@
-# RE4DLSS 1.3.1
+# RE4DLSS 1.3.2
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -48,7 +48,7 @@ Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShad
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.3.1.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.3.2.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
