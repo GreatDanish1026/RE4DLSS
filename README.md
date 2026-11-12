@@ -35,7 +35,7 @@ support, and REFramework for the render resolution dropdown.
   estimating it themselves: steadier brightness and less ghosting when the lighting changes.
 - **Effect mask** (on by default, Advanced tab): the mask the game makes for its FSR 2 (particles, transparent effects) now goes to DLSS as well as FSR 3.1,
   which then trust the current frame more there: less ghosting and smearing on effects.
-- **Full-resolution reflections** (off by default, Advanced tab): the bundled REFramework script
+- **Full-resolution reflections** (off by default, Settings tab): the bundled REFramework script
   makes the game ray trace its reflections at the full render resolution instead of a reduced one:
   sharper reflections, especially with Ray Reconstruction, at a GPU cost.
 - **Ray Reconstruction** (experimental, DLSS only, off by default): with the game's ray tracing on,
