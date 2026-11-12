@@ -1,4 +1,4 @@
-# RE4DLSS 1.3.2
+# RE4DLSS 1.4.0
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -31,6 +31,13 @@ support, and REFramework for the render resolution dropdown.
 - **Sharpening**: FSR 2's sharpening pass still runs on the upscaled image, so the game's
   Sharpness setting applies as before.
 - **DLSS model**: Automatic (default: K, M at Performance, L at Ultra Performance, as NVIDIA recommends), or K, J, L or M (DLSS 4.5) at every resolution, or NVIDIA's default.
+- **Game exposure** (on by default, Advanced tab): DLSS and FSR get the exposure the game's FSR 2 computes instead of
+  estimating it themselves: steadier brightness and less ghosting when the lighting changes.
+- **Effect mask** (on by default, Advanced tab): the mask the game makes for its FSR 2 (particles, transparent effects) now goes to DLSS as well as FSR 3.1,
+  which then trust the current frame more there: less ghosting and smearing on effects.
+- **Full-resolution reflections** (off by default, Advanced tab): the bundled REFramework script
+  makes the game ray trace its reflections at the full render resolution instead of a reduced one:
+  sharper reflections, especially with Ray Reconstruction, at a GPU cost.
 - **Ray Reconstruction** (experimental, DLSS only, off by default): with the game's ray tracing on,
   NVIDIA's DLSS Ray Reconstruction 310.9.16 replaces DLSS Super Resolution. It upscales and cleans up
   the remaining noise in the ray-traced reflections, on top of the game's own ray tracing denoiser
@@ -48,7 +55,7 @@ Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShad
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.3.2.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.4.0.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
