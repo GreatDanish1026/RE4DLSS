@@ -81,6 +81,7 @@ struct Settings {
     int upscaler = 0;     // Tech: Auto = DLSS where NGX runs (RTX), else FSR
     bool fsrReactive = true;  // give DLSS (bias mask) and FSR 3/4 the game's FSR 2 reactive mask
     bool gameExposure = true;  // give DLSS and FSR FSR 2's exposure texture instead of their auto-exposure
+    bool fullResReflections = false;  // REFramework script: ray traced reflections at full resolution
     int preset = dlss::kPresetAuto;  // DLSS model: Automatic, or NVSDK_NGX_DLSS_Hint_Render_Preset_* (0 = NVIDIA's)
     bool flipJitterX = false, flipJitterY = false;  // testing: jitter sign
     int resolution = 0;   // kResolutions: 0 = the game's FSR 2 setting (RE4DLSS.lua sets the others)
@@ -115,6 +116,7 @@ void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
     reshade::get_config_value(nullptr, RD_PRODUCT, "GameExposure", g_set.gameExposure);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "FullResReflections", g_set.fullResReflections);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
     reshade::get_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
@@ -131,6 +133,7 @@ void SaveSettings() {
     reshade::set_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
     reshade::set_config_value(nullptr, RD_PRODUCT, "GameExposure", g_set.gameExposure);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "FullResReflections", g_set.fullResReflections);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
     reshade::set_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
@@ -1416,6 +1419,33 @@ void GiveFrameGen(command_list* cl, ListState& s) {
                 kShaderResource, rw, rh, f[kJitter], f[kJitter + 1], reset);
 }
 
+// Full-resolution ray traced reflections, set by the REFramework script (RE4DLSS.lua): the wanted
+// SpecularResolution (0 = full, -1 = the game's) in reframework/data/RE4DLSS_rt.txt.
+void WriteWantedRt() {
+    static int written = -2;
+    const int want = g_set.fullResReflections ? 0 : -1;
+    if (want == written) return;
+    const std::wstring fw = ExeDir() + L"reframework";
+    if (GetFileAttributesW(fw.c_str()) == INVALID_FILE_ATTRIBUTES) return;  // no REFramework
+    CreateDirectoryW((fw + L"\\data").c_str(), nullptr);
+    if (FILE* f = _wfopen((fw + L"\\data\\RE4DLSS_rt.txt").c_str(), L"w")) {
+        fprintf(f, "%d\n", want);
+        fclose(f);
+        written = want;
+        Log("reflections for RE4DLSS.lua: %s", want == 0 ? "full resolution" : "the game's resolution");
+    }
+}
+
+// The script's report: the reflections' resolution now (0 full, 1 half), or -1 if unknown.
+int RtResolutionNow() {
+    FILE* f = _wfopen((ExeDir() + L"reframework\\data\\RE4DLSS_rt_status.txt").c_str(), L"r");
+    if (!f) return -1;
+    int v = -1;
+    if (fscanf(f, "%d", &v) != 1) v = -1;
+    fclose(f);
+    return v;
+}
+
 bool g_keyWasDown = false;
 
 }  // namespace
@@ -1521,6 +1551,7 @@ const char* QualityName(int q) {
 }  // namespace
 
 void UpscalerPresent(swapchain* sc) {
+    WriteWantedRt();
     WriteWantedQuality();
     dlss::EndFrame();
     fsr::EndFrame();
@@ -1712,6 +1743,14 @@ void UpscalerOverlay() {
         changed |= ImGui::Checkbox("Use the game's exposure", &g_set.gameExposure);
         Help("Gives DLSS and FSR the exposure the game's FSR 2 computes, instead of their own estimate: steadier "
              "brightness and less ghosting when the lighting changes.");
+        changed |= ImGui::Checkbox("Full-resolution reflections", &g_set.fullResReflections);
+        Help("Ray traces reflections at the full render resolution instead of the game's reduced one: sharper "
+             "reflections, especially with Ray Reconstruction, at a GPU cost. Needs REFramework (the bundled "
+             "RE4DLSS.lua sets it) and the game's ray tracing on.");
+        if (g_set.fullResReflections) {
+            const int now = RtResolutionNow();
+            ImGui::TextDisabled("Reflections now: %s", now == 0 ? "full resolution" : now == 1 ? "half resolution" : "unknown (is REFramework running?)");
+        }
         changed |= ImGui::Checkbox("Flip jitter X", &g_set.flipJitterX);
         ImGui::SameLine();
         changed |= ImGui::Checkbox("Flip jitter Y", &g_set.flipJitterY);
