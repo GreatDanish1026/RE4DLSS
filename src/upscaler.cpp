@@ -79,7 +79,8 @@ enum class Tech { Auto = 0, Dlss = 1, Fsr = 2 };
 struct Settings {
     bool enabled = true;  // F9; remembered across launches
     int upscaler = 0;     // Tech: Auto = DLSS where NGX runs (RTX), else FSR
-    bool fsrReactive = true;  // give FSR 3/4 the game's FSR 2 reactive mask
+    bool fsrReactive = true;  // give DLSS (bias mask) and FSR 3/4 the game's FSR 2 reactive mask
+    bool gameExposure = true;  // give DLSS and FSR FSR 2's exposure texture instead of their auto-exposure
     int preset = dlss::kPresetAuto;  // DLSS model: Automatic, or NVSDK_NGX_DLSS_Hint_Render_Preset_* (0 = NVIDIA's)
     bool flipJitterX = false, flipJitterY = false;  // testing: jitter sign
     int resolution = 0;   // kResolutions: 0 = the game's FSR 2 setting (RE4DLSS.lua sets the others)
@@ -113,6 +114,7 @@ void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "DlssModel", g_set.preset);
     reshade::get_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "GameExposure", g_set.gameExposure);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::get_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
     reshade::get_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
@@ -128,6 +130,7 @@ void SaveSettings() {
     reshade::set_config_value(nullptr, RD_PRODUCT, "DlssModel", g_set.preset);
     reshade::set_config_value(nullptr, RD_PRODUCT, "Upscaler", g_set.upscaler);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FsrReactiveMask", g_set.fsrReactive);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "GameExposure", g_set.gameExposure);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterX", g_set.flipJitterX);
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
     reshade::set_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
@@ -1132,6 +1135,19 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         Fail("FSR 2 inputs not found (depth, motion, colour or output): FSR 2 kept");
         return false;
     }
+    // FSR 2's exposure (t0 of accumulate: 1x1 rg32f from its luminance pass, exposure in r): the same
+    // exposure the game's FSR 2 used, for DLSS and FSR 3/4 instead of their own auto-exposure.
+    ID3D12Resource* gameExposure = nullptr;
+    if (g_set.gameExposure) {
+        const resource e = ComputeView(dev, s.compute, 0, false);
+        const resource_desc ed = e.handle ? dev->get_resource_desc(e) : resource_desc{};
+        if (e.handle && ed.texture.width == 1 && ed.texture.height == 1) gameExposure = reinterpret_cast<ID3D12Resource*>(e.handle);
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            Log("game exposure for DLSS/FSR: %s", gameExposure ? "FSR 2's exposure texture" : "not found (auto-exposure)");
+        }
+    }
     uint32_t cb[kCbWords];
     std::string how;
     if (!ReadFsrConstants(dev, s.compute, cb, &how)) {
@@ -1203,6 +1219,8 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         in.reset = reset;
         in.preset = g_set.preset;
         in.key = reinterpret_cast<const void*>(1);  // one history: FSR alternates its accumulate output
+        in.exposure = gameExposure;
+        in.biasMask = g_set.fsrReactive ? reinterpret_cast<ID3D12Resource*>(c.reactive.handle) : nullptr;
         // Ray Reconstruction while the game ray traces (rayTracingUpscale ran in the last second or
         // so, so a skipped frame doesn't switch DLSS features and restart their history).
         // The camera: the SceneInfo rayTracingUpscale read this frame.
@@ -1293,6 +1311,7 @@ bool OnAccumulate(command_list* cl, ListState& s) {
         in.motionScaleX = static_cast<float>(renderW);
         in.motionScaleY = static_cast<float>(renderH);
         in.preExposure = preExposure;
+        in.exposure = gameExposure;
         in.cameraNear = nearZ, in.cameraFar = farZ, in.cameraFovY = fovY;
         in.metersPerUnit = 1.0f;  // RE Engine: metres
         in.sharpness = 0;         // the game's RCAS sharpens afterwards
@@ -1687,9 +1706,12 @@ void UpscalerOverlay() {
     }
     if (ImGui::BeginTabItem("Advanced")) {
         ImGui::SeparatorText("Upscaling");
-        changed |= ImGui::Checkbox("FSR: use the game's reactive mask", &g_set.fsrReactive);
-        Help("The mask the game makes for its FSR 2 (particles, transparent effects): FSR 3.1 trusts the current "
-             "frame more there, against ghosting. FSR 4 ignores it.");
+        changed |= ImGui::Checkbox("Use the game's reactive mask", &g_set.fsrReactive);
+        Help("The mask the game makes for its FSR 2 (particles, transparent effects): DLSS and FSR 3.1 trust the "
+             "current frame more there, against ghosting and smearing. FSR 4 ignores it.");
+        changed |= ImGui::Checkbox("Use the game's exposure", &g_set.gameExposure);
+        Help("Gives DLSS and FSR the exposure the game's FSR 2 computes, instead of their own estimate: steadier "
+             "brightness and less ghosting when the lighting changes.");
         changed |= ImGui::Checkbox("Flip jitter X", &g_set.flipJitterX);
         ImGui::SameLine();
         changed |= ImGui::Checkbox("Flip jitter Y", &g_set.flipJitterY);

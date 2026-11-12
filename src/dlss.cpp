@@ -40,6 +40,7 @@ struct Feature {
     int preset = -1;
     bool rr = false;
     int rrPreset = -1;
+    bool autoExposure = true;
     NVSDK_NGX_PerfQuality_Value quality = NVSDK_NGX_PerfQuality_Value_MaxQuality;
 };
 constexpr size_t kMaxFeatures = 4;
@@ -107,7 +108,9 @@ bool CreateFeature(ID3D12GraphicsCommandList* list, const Inputs& in, Feature& f
         NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality};
     for (const char* k : presetKeys) NVSDK_NGX_Parameter_SetUI(g_params, k, static_cast<unsigned>(in.preset));
     const int flags = NVSDK_NGX_DLSS_Feature_Flags_IsHDR | NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
-                      NVSDK_NGX_DLSS_Feature_Flags_DepthInverted | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
+                      NVSDK_NGX_DLSS_Feature_Flags_DepthInverted |
+                      (in.exposure ? 0 : NVSDK_NGX_DLSS_Feature_Flags_AutoExposure);
+    f.autoExposure = !in.exposure;
 
     if (in.rr) {
         const char* rrKeys[] = {NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA,
@@ -262,7 +265,7 @@ bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& requested, std::str
     }
     const bool fresh = !f.handle || in.renderWidth != f.renderW || in.renderHeight != f.renderH ||
                        in.outputWidth != f.outW || in.outputHeight != f.outH || in.preset != f.preset || in.rr != f.rr ||
-                       (in.rr && in.rrPreset != f.rrPreset);
+                       (in.rr && in.rrPreset != f.rrPreset) || f.autoExposure != !in.exposure;
     if (fresh && !CreateFeature(list, in, f, error)) {
         g_status = error;
         return false;
@@ -285,6 +288,8 @@ bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& requested, std::str
         dp.InMVScaleY = in.motionScaleY;
         dp.InPreExposure = in.preExposure;
         dp.InExposureScale = 1.0f;
+        dp.pInExposureTexture = in.exposure;
+        dp.pInBiasCurrentColorMask = in.biasMask;
         // The parameter block keeps these pointers after the call (Super Resolution clears them).
         static float worldToView[16], viewToClip[16];
         memcpy(worldToView, in.worldToView, sizeof(worldToView));
@@ -321,6 +326,8 @@ bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& requested, std::str
     ep.InMVScaleY = in.motionScaleY;
     ep.InPreExposure = in.preExposure;
     ep.InExposureScale = 1.0f;
+    ep.pInExposureTexture = in.exposure;
+    ep.pInBiasCurrentColorMask = in.biasMask;
     const NVSDK_NGX_Result r = NGX_D3D12_EVALUATE_DLSS_EXT(list, f.handle, g_params, &ep);
     if (NVSDK_NGX_FAILED(r)) {
         error = "DLSS evaluation failed (" + ResultText(r) + ")";
