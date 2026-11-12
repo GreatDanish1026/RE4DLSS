@@ -86,7 +86,7 @@ struct Settings {
     bool flipJitterX = false, flipJitterY = false;  // testing: jitter sign
     int resolution = 0;   // kResolutions: 0 = the game's FSR 2 setting (RE4DLSS.lua sets the others)
     // DLSS Ray Reconstruction in place of Super Resolution while the game ray traces (ini
-    // RayReconstruction; experimental, off by default). rrPreset: NVSDK_NGX_RayReconstruction_Hint_Render_Preset_*
+    // RayReconstruction; off by default). rrPreset: NVSDK_NGX_RayReconstruction_Hint_Render_Preset_*
     // (ini RrModel, 0 = NVIDIA's default). rrDenoise (ini RrDenoise): which of the game's ray tracing
     // denoise passes are skipped: 0 none, 1 all but the spatial one, 2 all.
     // guideView: debug view of one guide (not saved).
@@ -1685,14 +1685,14 @@ void UpscalerOverlay() {
         {
             const bool fsrRuns = ResolvedTech() == Tech::Fsr;
             ImGui::BeginDisabled(fsrRuns);
-            if (ImGui::Checkbox("Ray Reconstruction (experimental)", &g_set.rr)) {
+            if (ImGui::Checkbox("Ray Reconstruction", &g_set.rr)) {
                 changed = true;
                 Log("Ray Reconstruction setting: %s", g_set.rr ? "on" : "off");
             }
             Help("NVIDIA's DLSS Ray Reconstruction in place of DLSS Super Resolution while the game ray traces:\n"
                  "it upscales and cleans up what's left of the noise in the ray-traced reflections, on top of the\n"
                  "game's own ray tracing denoiser. Needs the game's ray tracing on (Super Resolution otherwise).\n"
-                 "Experimental. The Advanced tab can skip parts of the game's denoiser for testing.");
+                 "The Advanced tab can skip parts of the game's denoiser for testing.");
             if (g_set.rr) {
                 static const char* const kRrNames[] = {"NVIDIA's default", "D (transformer)", "E (latest transformer)",
                                                        "F (RR 2)"};

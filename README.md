@@ -2,7 +2,7 @@
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
-**DLSS or FSR frame generation** and experimental **DLSS Ray Reconstruction** for the ray-traced
+**DLSS or FSR frame generation** and **DLSS Ray Reconstruction** for the ray-traced
 reflections. The game ships AMD FSR 2.1; with this add-on, FSR 2's quality
 setting (or the add-on's render resolution, which adds Native: DLAA) picks the render size and the
 chosen upscaler does the upscaling.
@@ -38,7 +38,7 @@ support, and REFramework for the render resolution dropdown.
 - **Full-resolution reflections** (off by default, Settings tab): the bundled REFramework script
   makes the game ray trace its reflections at the full render resolution instead of a reduced one:
   sharper reflections, especially with Ray Reconstruction, at a GPU cost.
-- **Ray Reconstruction** (experimental, DLSS only, off by default): with the game's ray tracing on,
+- **Ray Reconstruction** (DLSS only, off by default): with the game's ray tracing on,
   NVIDIA's DLSS Ray Reconstruction 310.9.16 replaces DLSS Super Resolution. It upscales and cleans up
   the remaining noise in the ray-traced reflections, on top of the game's own ray tracing denoiser
   (built from the game's G-buffer and camera). **Ray Reconstruction model**: NVIDIA's default, D, E
