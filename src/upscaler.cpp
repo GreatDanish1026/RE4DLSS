@@ -1754,7 +1754,7 @@ void UpscalerOverlay() {
              "current frame more there, against ghosting and smearing. FSR 4 ignores it.");
         changed |= ImGui::Checkbox("Use the game's exposure", &g_set.gameExposure);
         Help("Gives DLSS and FSR the exposure the game's FSR 2 computes, instead of their own estimate: steadier "
-             "brightness and less ghosting when the lighting changes.");
+             "brightness and less ghosting when the lighting changes. DLSS and FSR 3.1 only: FSR 4 measures its own.");
         ImGui::SeparatorText("Ray Reconstruction testing");
         ImGui::SetNextItemWidth(ControlWidth() * 1.4f);
         if (ImGui::Combo("Game's ray tracing denoiser", &g_set.rrDenoise, kRrDenoiseNames, 3)) {
