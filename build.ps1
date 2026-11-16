@@ -112,7 +112,7 @@ if ($Package) {
         "name=RE4DLSS - DLSS, FSR 3/4 and frame generation for Resident Evil 4",
         "version=v$version",
         "description=Puts NVIDIA DLSS or AMD FSR 3.1 / FSR 4 in place of the game's FSR 2 upscaler, and adds DLSS or FSR frame generation and experimental DLSS Ray Reconstruction for the ray-traced reflections: turn FSR 2 on in the game and its quality setting picks the render size, the chosen upscaler does the upscaling, and the game's sharpness setting still applies. With REFramework, the overlay's render resolution adds Native (100%): DLAA, or FSR native anti-aliasing. DLSS needs an NVIDIA RTX card (frame generation RTX 40/50); FSR runs on any DirectX 12 GPU (FSR 4 on Radeons that support it). Needs ReShade 6.8+ with add-on support. Settings: ReShade overlay (Home), Add-ons tab, RE4DLSS; F9 switches upscaling on and off.",
-        "author=Scott Dinwiddie"
+        "author=GreatDanish"
     ) | Set-Content "$mod\modinfo.ini" -Encoding ascii
 
     # Zip with forward-slash entry names (Compress-Archive in PowerShell 5.1 writes backslashes,
