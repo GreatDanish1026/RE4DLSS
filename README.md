@@ -1,4 +1,4 @@
-# RE4DLSS 1.4.2
+# RE4DLSS 1.4.3
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -41,11 +41,11 @@ support, and REFramework for the render resolution dropdown.
   sharper reflections, especially with Ray Reconstruction, at a GPU cost.
 - **Ray Reconstruction** (DLSS only, off by default): with the game's ray tracing on,
   NVIDIA's DLSS Ray Reconstruction 310.9.16 replaces DLSS Super Resolution. It upscales and cleans up
-  the remaining noise in the ray-traced reflections, on top of the game's own ray tracing denoiser
-  (built from the game's G-buffer and camera). **Ray Reconstruction model**: NVIDIA's default, D, E
-  or F; an override in the NVIDIA App takes precedence. The Advanced tab can skip parts of the
-  game's denoiser and hand Ray Reconstruction the reflection rays directly, for testing (the game
-  traces below the render size, so that looks blotchier), and shows the surface pictures Ray
+  the noise in the ray-traced reflections, with guides built from the game's G-buffer and camera.
+  **Ray Reconstruction model**: NVIDIA's default, D, E or F; an override in the NVIDIA App takes
+  precedence. By default the game's frame-to-frame denoising is skipped and Ray Reconstruction does
+  it (1.4.3); the Advanced tab can keep the game's whole denoiser instead, or skip all of it, and
+  shows the surface pictures Ray
   Reconstruction gets (colour, reflectivity, normals, roughness). Without ray tracing (menus, some
   cutscenes, or ray tracing off) it uses Super Resolution. Also works when a mod turns on the
   game's hidden ray-traced global illumination (such as the RE4R Graphics Enhancement REFramework
@@ -56,7 +56,7 @@ Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShad
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.4.2.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.4.3.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and

@@ -88,11 +88,13 @@ struct Settings {
     // DLSS Ray Reconstruction in place of Super Resolution while the game ray traces (ini
     // RayReconstruction; off by default). rrPreset: NVSDK_NGX_RayReconstruction_Hint_Render_Preset_*
     // (ini RrModel, 0 = NVIDIA's default). rrDenoise (ini RrDenoise): which of the game's ray tracing
-    // denoise passes are skipped: 0 none, 1 all but the spatial one, 2 all.
+    // denoise passes are skipped: 0 none, 1 all but the spatial one, 2 all. Default 1 since 2026-11-17
+    // (looked better in RE4, as in RE2/RE3/RE7; not in Village); the ini key changed from RrDenoise so
+    // everyone moves to it once.
     // guideView: debug view of one guide (not saved).
     bool rr = false;
     int rrPreset = 0;
-    int rrDenoise = 0;
+    int rrDenoise = 1;
     int guideView = 0;
 } g_set;
 
@@ -122,8 +124,8 @@ void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
     reshade::get_config_value(nullptr, RD_PRODUCT, "RrModel", g_set.rrPreset);
     if (g_set.rrPreset != 0 && (g_set.rrPreset < 4 || g_set.rrPreset > 6)) g_set.rrPreset = 0;
-    reshade::get_config_value(nullptr, RD_PRODUCT, "RrDenoise", g_set.rrDenoise);
-    if (g_set.rrDenoise < 0 || g_set.rrDenoise > 2) g_set.rrDenoise = 0;
+    reshade::get_config_value(nullptr, RD_PRODUCT, "RrDenoiseMode", g_set.rrDenoise);
+    if (g_set.rrDenoise < 0 || g_set.rrDenoise > 2) g_set.rrDenoise = 1;
 }
 
 void SaveSettings() {
@@ -138,7 +140,7 @@ void SaveSettings() {
     reshade::set_config_value(nullptr, RD_PRODUCT, "FlipJitterY", g_set.flipJitterY);
     reshade::set_config_value(nullptr, RD_PRODUCT, "RayReconstruction", g_set.rr);
     reshade::set_config_value(nullptr, RD_PRODUCT, "RrModel", g_set.rrPreset);
-    reshade::set_config_value(nullptr, RD_PRODUCT, "RrDenoise", g_set.rrDenoise);
+    reshade::set_config_value(nullptr, RD_PRODUCT, "RrDenoiseMode", g_set.rrDenoise);
 }
 
 std::mutex g_statusMutex;
@@ -630,8 +632,8 @@ constexpr UpscaleSignal kUpSignalsGi[] = {{0, 6}, {1, 7}, {2, 8}};
 constexpr int kSpecularSlot = 2;
 constexpr int kViewProj = 0;       // SceneInfo: row_major viewProjMat, byte 0
 
-const char* const kRrDenoiseNames[] = {"Game's denoiser, Ray Reconstruction on top (recommended)",
-                                       "Skip all but the spatial passes (experimental)", "Skip all: raw rays (experimental)"};
+const char* const kRrDenoiseNames[] = {"Game's denoiser, Ray Reconstruction on top",
+                                       "Skip all but the spatial passes (recommended)", "Skip all: raw rays (experimental)"};
 const char* const kGuideViewNames[] = {"Off", "Diffuse albedo", "Specular albedo", "Normals", "Roughness"};
 constexpr int kGuideViewCount = 5;
 
@@ -1762,10 +1764,11 @@ void UpscalerOverlay() {
             Log("Ray Reconstruction denoising setting: %s", kRrDenoiseNames[g_set.rrDenoise]);
         }
         Help("While Ray Reconstruction runs, which of the game's own ray tracing denoise passes still run.\n"
-             "Game's denoiser (recommended): everything stays; Ray Reconstruction upscales and cleans up the\n"
-             "result. Skip all but the spatial pass: the game's frame-to-frame (temporal) filtering, variance\n"
-             "and deflicker are skipped. Skip all: Ray Reconstruction gets the raw reflection rays. The game\n"
-             "traces below the render size, so the skipping choices come out blotchier.");
+             "Skip all but the spatial pass (recommended, looked best in testing): the game's frame-to-frame\n"
+             "(temporal) filtering, variance and deflicker are skipped, so Ray Reconstruction does the\n"
+             "denoising over time. Game's denoiser: everything stays and Ray Reconstruction cleans up the\n"
+             "result. Skip all: Ray Reconstruction gets the raw reflection rays (blotchier: the game traces\n"
+             "below the render size).");
         ImGui::SetNextItemWidth(ControlWidth());
         if (ImGui::Combo("Show guide", &g_set.guideView, kGuideViewNames, kGuideViewCount))
             Log("diagnosis: show guide %s", kGuideViewNames[g_set.guideView]);
