@@ -1,4 +1,4 @@
-# RE4DLSS 1.4.3
+# RE4DLSS 1.4.4
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -43,9 +43,12 @@ support, and REFramework for the render resolution dropdown.
   NVIDIA's DLSS Ray Reconstruction 310.9.16 replaces DLSS Super Resolution. It upscales and cleans up
   the noise in the ray-traced reflections, with guides built from the game's G-buffer and camera.
   **Ray Reconstruction model**: NVIDIA's default, D, E or F; an override in the NVIDIA App takes
-  precedence. By default the game's frame-to-frame denoising is skipped and Ray Reconstruction does
-  it (1.4.3); the Advanced tab can keep the game's whole denoiser instead, or skip all of it, and
-  shows the surface pictures Ray
+  precedence. By default (Auto, 1.4.4) the add-on looks at how finely the game ray traces: at the
+  render resolution (as with a Graphics Enhancement script's higher ray tracing quality) the game's
+  frame-to-frame denoising is skipped and Ray Reconstruction does it; at the game's own, smaller
+  size the rays are too sparse for that, so the game's denoiser stays and Ray Reconstruction cleans
+  up after it. The Advanced tab can choose either always, or skip all of the game's denoiser.
+  Advanced also shows the surface pictures Ray
   Reconstruction gets (colour, reflectivity, normals, roughness). Without ray tracing (menus, some
   cutscenes, or ray tracing off) it uses Super Resolution. Also works when a mod turns on the
   game's hidden ray-traced global illumination (such as the RE4R Graphics Enhancement REFramework
@@ -56,7 +59,7 @@ Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShad
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.4.3.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.4.4.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
