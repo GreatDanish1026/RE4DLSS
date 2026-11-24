@@ -672,6 +672,10 @@ struct RtState {
     int denseVotes = 0;
 } g_rt;
 
+// The screen size (at each present) and the main FSR 2 view's render width (SecondaryView): a
+// second view (the biosensor scope) is told apart by them.
+std::atomic<uint32_t> g_backW{0}, g_backH{0}, g_mainRenderW{0};
+
 // The denoiser setting in effect (Auto resolved). g_rtMutex held.
 int RrDenoise() {
     if (g_set.rrDenoise != kRrDenoiseAuto) return g_set.rrDenoise;
@@ -804,6 +808,13 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
     const bool rr = g_set.rr && g_set.enabled;
     if (!rr && !(upscalePass && FrameGenWantsCamera())) return false;
     device* dev = cl->get_device();
+    // A second view's ray tracing (the biosensor scope's picture, traced far smaller than the main
+    // view's render size): left entirely to the game (its denoise passes run, its camera and signals
+    // aren't taken for the main view's Ray Reconstruction or frame generation).
+    if (const uint32_t mainW = g_mainRenderW.load()) {
+        const resource u0 = ComputeView(dev, s.compute, 0, true);
+        if (u0.handle && dev->get_resource_desc(u0).texture.width * 3 < mainW) return false;
+    }
     const uint64_t frame = g_presents.load();
     std::lock_guard<std::mutex> lock(g_rtMutex);
     if (!rr) {  // frame generation only: just the camera
@@ -1426,6 +1437,33 @@ void DrawHudless(command_list* cl, ListState& s) {
     if (++g_hudlessDrawn == 1) Log("frame generation: picture before the HUD drawn (final pass repeated without the HUD)");
 }
 
+// The game's second FSR 2 view (the biosensor scope draws its picture through FSR 2 at 256x256 ->
+// 512x512 while the main view runs): one DLSS / Ray Reconstruction feature for both was rebuilt
+// every frame, alternating sizes, which slowed the game down until the GPU hung (user, 2026-11-24:
+// DXGI_ERROR_DEVICE_HUNG aiming the scope; the long-open "biosensor scope" issue). Only the view
+// whose output is the screen's size gets DLSS/FSR 3/4 and frame generation; smaller ones keep FSR 2.
+// (g_backW, g_backH: the swap chain size, declared with g_mainRenderW above.)
+
+bool SecondaryView(command_list* cl, ListState& s) {
+    const uint32_t bw = g_backW.load(), bh = g_backH.load();
+    if (!bw || !bh) return false;
+    uint32_t cb[kCbWords];
+    std::string how;
+    if (!ReadFsrConstants(cl->get_device(), s.compute, cb, &how)) return false;
+    const uint32_t outW = cb[kDisplaySize], outH = cb[kDisplaySize + 1];
+    const bool secondary = outW * 2 <= bw || outH * 2 <= bh;  // half the screen or less
+    if (!secondary) g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
+    if (secondary) {
+        static uint32_t loggedW = 0, loggedH = 0;
+        if (outW != loggedW || outH != loggedH) {
+            loggedW = outW, loggedH = outH;
+            Log("a second FSR 2 view (%ux%u -> %ux%u, screen %ux%u; e.g. the biosensor scope): the game's FSR 2 kept "
+                "for it", cb[kRenderSize], cb[kRenderSize + 1], outW, outH, bw, bh);
+        }
+    }
+    return secondary;
+}
+
 // Frame generation's inputs for this frame: the camera (this list's SceneInfo, else the last one
 // seen), the game's converted depth and motion vectors (shader resource state, as FSR 2 left them),
 // FSR 2's render size, jitter and reset.
@@ -1541,6 +1579,10 @@ bool UpscalerOnDispatch(command_list* cl) {
         case kDepthCs: s->chain.depth = ComputeView(cl->get_device(), s->compute, 0, true); return false;
         case kLumaCs: s->chain.color = ComputeView(cl->get_device(), s->compute, 0, false); return false;
         case kAccumulateCs: {
+            if (SecondaryView(cl, *s)) {  // e.g. the biosensor scope's picture: the game's FSR 2 does it
+                s->chain = Chain();
+                return false;
+            }
             GiveFrameGen(cl, *s);
             const bool replaced = g_set.enabled && OnAccumulate(cl, *s);
             s->chain = Chain();  // each frame gathers its own inputs
@@ -1602,6 +1644,10 @@ const char* QualityName(int q) {
 }  // namespace
 
 void UpscalerPresent(swapchain* sc) {
+    {
+        const resource_desc bd = sc->get_device()->get_resource_desc(sc->get_current_back_buffer());
+        g_backW = bd.texture.width, g_backH = bd.texture.height;
+    }
     WriteWantedRt();
     WriteWantedQuality();
     dlss::EndFrame();
