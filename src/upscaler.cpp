@@ -1467,15 +1467,25 @@ bool SecondaryView(command_list* cl, ListState& s) {
 // Frame generation's inputs for this frame: the camera (this list's SceneInfo, else the last one
 // seen), the game's converted depth and motion vectors (shader resource state, as FSR 2 left them),
 // FSR 2's render size, jitter and reset.
+// Diagnostics for frames frame generation gets no inputs for (scope, 2026-11-24): main FSR 2 views
+// per present, and why a hand-off didn't happen. Logged with the frame generation diag line.
+std::atomic<uint32_t> g_mainViewsThisFrame{0};
+std::atomic<uint32_t> g_fgNoMainView{0}, g_fgTwoMainViews{0}, g_fgNoDepth{0}, g_fgNoMotion{0}, g_fgNoConstants{0},
+    g_fgOtherViewInputs{0};
+
 void GiveFrameGen(command_list* cl, ListState& s) {
-    if (!FrameGenWantsCamera() || !s.chain.depth.handle || !s.chain.motion.handle) return;
+    if (!FrameGenWantsCamera()) return;
+    if (!s.chain.depth.handle) return void(++g_fgNoDepth);
+    if (!s.chain.motion.handle) return void(++g_fgNoMotion);
     device* dev = cl->get_device();
     uint32_t cb[kCbWords];
     std::string how;
-    if (!ReadFsrConstants(dev, s.compute, cb, &how)) return;
+    if (!ReadFsrConstants(dev, s.compute, cb, &how)) return void(++g_fgNoConstants);
     float f[kCbWords];
     memcpy(f, cb, sizeof(f));
     const uint32_t rw = cb[kRenderSize], rh = cb[kRenderSize + 1];
+    // The depth gathered for this accumulate should be this view's (render size or larger).
+    if (dev->get_resource_desc(s.chain.depth).texture.width < rw) return void(++g_fgOtherViewInputs);
     g_sceneW = rw, g_sceneH = rh;  // what SceneInfo must say from now on
     bool fromRt = false;
     {
@@ -1583,6 +1593,7 @@ bool UpscalerOnDispatch(command_list* cl) {
                 s->chain = Chain();
                 return false;
             }
+            ++g_mainViewsThisFrame;
             GiveFrameGen(cl, *s);
             const bool replaced = g_set.enabled && OnAccumulate(cl, *s);
             s->chain = Chain();  // each frame gathers its own inputs
@@ -1647,6 +1658,9 @@ void UpscalerPresent(swapchain* sc) {
     {
         const resource_desc bd = sc->get_device()->get_resource_desc(sc->get_current_back_buffer());
         g_backW = bd.texture.width, g_backH = bd.texture.height;
+        const uint32_t views = g_mainViewsThisFrame.exchange(0);
+        if (views == 0) ++g_fgNoMainView;
+        if (views > 1) ++g_fgTwoMainViews;
     }
     WriteWantedRt();
     WriteWantedQuality();
@@ -1655,7 +1669,11 @@ void UpscalerPresent(swapchain* sc) {
     ++g_presents;
     if (g_presents % 600 == 0) {
         const std::string d = FrameGenDiag();
-        if (!d.empty() && d.find("frames untagged 0,") == std::string::npos) Log("frame generation diag:%s", d.c_str());
+        if (!d.empty() && d.find("frames untagged 0,") == std::string::npos)
+            Log("frame generation diag:%s; frames without a main FSR 2 view %u, with two %u, hand-off skipped: no depth %u, "
+                "no motion %u, no constants %u, another view's inputs %u",
+                d.c_str(), g_fgNoMainView.exchange(0), g_fgTwoMainViews.exchange(0), g_fgNoDepth.exchange(0),
+                g_fgNoMotion.exchange(0), g_fgNoConstants.exchange(0), g_fgOtherViewInputs.exchange(0));
     }
     // Load AMD's runtime as soon as FSR is chosen, so the log and overlay say at once whether it
     // can run (not only when the game next runs its FSR 2 passes).

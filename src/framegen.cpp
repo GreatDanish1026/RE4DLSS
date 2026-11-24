@@ -265,6 +265,11 @@ void DestroyMask(device* dev) {
 bool g_fgOn = false;                  // what Streamline was last told
 std::atomic<uint64_t> g_presents{0}, g_tagged{0};
 uint32_t g_untagged = 0;  // game frames in a row without inputs
+// Frame generation pauses only after this many frames in a row without inputs (menus, loading,
+// upscaling off). Shorter gaps (the game drawing no new main view for a few frames, as while
+// raising the biosensor scope: RE4DLSS, 2026-11-24, 8 paused and resumed it several times a second)
+// just get no generated frame: each pause and resume can stutter.
+constexpr uint32_t kPauseAfterUntagged = 30;
 // Diagnostics (upscaler.cpp's diag line): tag calls that returned early, tags set, frames untagged.
 std::map<std::string, uint32_t> g_tagWhy;
 uint32_t g_tagsSet = 0, g_framesUntagged = 0;
@@ -433,7 +438,7 @@ void BeforePresentFsr() {
                     fwd[3] = {c.cameraFwd.x, c.cameraFwd.y, c.cameraFwd.z};
         memcpy(in.position, pos, 12), memcpy(in.up, up, 12), memcpy(in.right, right, 12), memcpy(in.forward, fwd, 12);
     }
-    const bool want = g_set.enabled && g_tagged > 0 && g_untagged < 8;
+    const bool want = g_set.enabled && g_tagged > 0 && g_untagged < kPauseAfterUntagged;
     ID3D12Resource* hud = g_hudless.Has(g_frame) && g_hudlessTex.handle ? reinterpret_cast<ID3D12Resource*>(g_hudlessTex.handle) : nullptr;
     ID3D12Resource* mask = hud && g_hudMask.Has(g_frame) && g_mask.tex.handle ? reinterpret_cast<ID3D12Resource*>(g_mask.tex.handle) : nullptr;
     CheckUiRow();  // the HUD layer's alpha check (inverted or not), for the mask
@@ -468,7 +473,7 @@ void BeforePresent() {
     if (g_tagged) Trace(g_inputs.Has(g_frame) ? "present with inputs" : "present WITHOUT inputs", g_frame);
     g_untagged = g_inputs.Has(g_frame) ? 0 : g_untagged + 1;
     if (g_untagged) ++g_framesUntagged;
-    SetFrameGeneration(g_set.enabled && g_tagged > 0 && g_untagged < 8);
+    SetFrameGeneration(g_set.enabled && g_tagged > 0 && g_untagged < kPauseAfterUntagged);
     // The overlay's status, read here: Streamline wants it read on the presenting thread.
     if (g_sl.dlssgGetState && g_presents % 30 == 0) {
         sl::DLSSGState st{};
@@ -944,6 +949,16 @@ void OnSlLog(sl::LogType type, const char* msg) {
     if (type == sl::LogType::eInfo) return;  // Streamline's own log file has them
     std::string s = msg ? msg : "";
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    // A frame without inputs (the game drew no new main view, e.g. raising the biosensor scope) makes
+    // Streamline report the missing tags, 2-3 lines a frame: the first ones are logged, then counted.
+    if (s.find("not set for frame") != std::string::npos || s.find("Failed to find global tag") != std::string::npos ||
+        s.find("Unable to find 'common' constants") != std::string::npos) {
+        static uint32_t seen = 0;
+        if (++seen > 12) {
+            if (seen == 13) Log("streamline: further 'missing inputs for a frame' messages not logged");
+            return;
+        }
+    }
     Log("streamline %s: %s", type == sl::LogType::eError ? "error" : "warning", s.c_str());
 }
 
