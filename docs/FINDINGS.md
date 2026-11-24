@@ -123,3 +123,21 @@ traces, rayTracingUpscale's b0 is SceneInfo (read once a frame since 1.3.0 for R
 Reconstruction): frame generation now takes it from there (also with Ray Reconstruction off), and
 the search only runs when that camera is missing for 30 frames or doesn't match the render size.
 Tested: fps and GPU usage back to normal with frame generation 2x ("looks good now").
+
+## 1.4.5: biosensor scope (2026-11-24)
+
+Aiming the biosensor scope slowed the game down and crashed it (DXGI_ERROR_DEVICE_HUNG) with Ray
+Reconstruction on. The scope's picture is a second FSR 2 view (256x256 -> 512x512, switching to
+512x512 -> 1024x1024 from frame to frame) run alongside the main one; with one DLSS history for
+all accumulate passes (FSR 2 alternates its output texture), the DLSS / Ray Reconstruction
+feature, its guides and frame generation's depth copy were rebuilt every frame, alternating
+sizes, until the GPU hung. Now an accumulate whose display size is half the screen or less keeps
+FSR 2 and gives frame generation nothing, and ray tracing passes traced at under a third of the
+main view's render width are left to the game (denoise not skipped, camera and signals not
+taken). Tested: smooth, scope picture fine.
+
+While aiming, some frames (up to 4-8% in earlier runs) have no main FSR 2 view at all (per-frame
+compute pass lists: either no FSR 2 pass, or only the scope's): the game draws no new main view.
+8 such frames in a row paused frame generation, so it switched off and on several times a
+second; frame generation now pauses only after 30 (kPauseAfterUntagged). Tested: no pause while
+scoped. The diag line counts frames without a main view / hand-offs skipped and why.
