@@ -41,6 +41,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "../third_party/reshade/utils/descriptor_tracking.hpp"
 #include "dlss.hpp"
@@ -1454,9 +1455,13 @@ bool SecondaryView(command_list* cl, ListState& s) {
     const bool secondary = outW * 2 <= bw || outH * 2 <= bh;  // half the screen or less
     if (!secondary) g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
     if (secondary) {
-        static uint32_t loggedW = 0, loggedH = 0;
-        if (outW != loggedW || outH != loggedH) {
-            loggedW = outW, loggedH = outH;
+        // Each size once: the scope's view switches between two sizes from frame to frame.
+        static std::mutex m;
+        static std::vector<uint64_t> logged;
+        const uint64_t key = (static_cast<uint64_t>(outW) << 32) | outH;
+        std::lock_guard<std::mutex> lock(m);
+        if (logged.size() < 16 && std::find(logged.begin(), logged.end(), key) == logged.end()) {
+            logged.push_back(key);
             Log("a second FSR 2 view (%ux%u -> %ux%u, screen %ux%u; e.g. the biosensor scope): the game's FSR 2 kept "
                 "for it", cb[kRenderSize], cb[kRenderSize + 1], outW, outH, bw, bh);
         }
