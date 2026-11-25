@@ -82,7 +82,11 @@ struct Settings {
     float separation = 40;
     // FSR: what it compares the back buffer with to find the HUD (fsrfg::HudMode); ini FsrHudMode.
     int fsrHud = 0;
+    // NVIDIA Reflex with DLSS frame generation (which needs it on): 0 low latency, 1 low latency +
+    // boost (keeps the GPU's clocks up when the CPU limits). ini ReflexMode.
+    int reflex = 0;
 } g_set;
+const char* const kReflexNames[] = {"On", "On + Boost"};
 const char* const kFsrHudNames[] = {"On (recommended)", "On", "Off"};  // RE4: both "on" modes use the picture before the HUD
 
 uint32_t g_maxFrames = 1;  // DLSSGState::numFramesToGenerateMax
@@ -975,6 +979,16 @@ void Feature(sl::Feature f, T*& fn, const char* name) {
     if (!fn) Log("frame generation: %s not available", name);
 }
 
+// Tells Streamline the Reflex mode chosen (Streamline started; at start and when the setting changes).
+void ApplyReflex() {
+    if (!g_sl.reflexSetOptions) return;
+    sl::ReflexOptions reflex{};
+    reflex.mode = g_set.reflex == 1 ? sl::ReflexMode::eLowLatencyWithBoost : sl::ReflexMode::eLowLatency;
+    const sl::Result r = g_sl.reflexSetOptions(reflex);
+    if (r != sl::Result::eOk) Log("frame generation: slReflexSetOptions failed: %d", static_cast<int>(r));
+    else Log("Reflex: %s", kReflexNames[g_set.reflex]);
+}
+
 bool InitStreamline(ID3D12Device* device, std::string& error) {
     static std::wstring dir;
     dir = ExeDir() + L"streamline\\";
@@ -1048,10 +1062,7 @@ bool InitStreamline(ID3D12Device* device, std::string& error) {
         error = "Streamline features missing (see the log)";
         return false;
     }
-    sl::ReflexOptions reflex{};
-    reflex.mode = sl::ReflexMode::eLowLatency;  // DLSS-G requires Reflex
-    r = g_sl.reflexSetOptions(reflex);
-    if (r != sl::Result::eOk) Log("frame generation: slReflexSetOptions failed: %d", static_cast<int>(r));
+    ApplyReflex();  // DLSS-G requires Reflex
     const uint32_t first = 0;
     if (g_sl.getNewFrameToken(g_token, &first) != sl::Result::eOk) {
         error = "slGetNewFrameToken failed";
@@ -1579,6 +1590,8 @@ void RegisterFrameGen() {
     if (g_set.tech < 0 || g_set.tech >= kTechCount) g_set.tech = kTechDlss;
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrHudMode", g_set.fsrHud);
     if (g_set.fsrHud < 0 || g_set.fsrHud >= fsrfg::kHudModeCount) g_set.fsrHud = fsrfg::kHudComposite;
+    reshade::get_config_value(nullptr, RD_PRODUCT, "ReflexMode", g_set.reflex);
+    if (g_set.reflex < 0 || g_set.reflex > 1) g_set.reflex = 0;
     g_activeTech = g_set.tech;  // until the next launch
     g_set.enabled = g_set.mode != kOff && kTsrMapped;  // needs the upscaler, which needs TSR mapped
     if (g_set.enabled) Log("frame generation: %s, %s", kTechNames[g_activeTech], kModeNames[EffectiveMode(g_set.mode)]);
@@ -1637,6 +1650,19 @@ void DrawFrameGenSettings() {
          "latency.\n\nNeeds the game's FSR 2 on (with or without the add-on's DLSS/FSR upscaling) and runs in game "
          "only (not in menus). "
          "Switching it on, or between DLSS and FSR, takes a game restart; DLSS's multipliers switch right away.");
+
+    ImGui::BeginDisabled(!g_set.enabled || g_set.tech != kTechDlss);
+    ImGui::SetNextItemWidth(ControlWidth());
+    if (ImGui::Combo("NVIDIA Reflex", &g_set.reflex, kReflexNames, 2)) {
+        reshade::set_config_value(nullptr, RD_PRODUCT, "ReflexMode", g_set.reflex);
+        Log("settings: Reflex %s", kReflexNames[g_set.reflex]);
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        if (g_ready && !Fsr()) ApplyReflex();
+    }
+    ImGui::EndDisabled();
+    Help("NVIDIA Reflex, with DLSS frame generation (which needs it on): it keeps the CPU from running ahead of the "
+         "GPU, for lower latency.\n\nOn + Boost: also keeps the GPU's clocks up, which can lower latency a little "
+         "more when the CPU is the limit, at some extra power. Switches right away.");
 
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
