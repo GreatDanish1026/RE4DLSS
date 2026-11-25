@@ -87,7 +87,7 @@ struct Settings {
     int reflex = 0;
     // Reflex's wait on the game thread, right before it reads input (the controller poll), instead
     // of on the render thread after each present (latency plan step 2, 2026-11-25). ini ReflexAtInput.
-    bool reflexAtInput = false;
+    bool reflexAtInput = true;
 } g_set;
 const char* const kReflexNames[] = {"On", "On + Boost"};
 const char* const kFsrHudNames[] = {"On (recommended)", "On", "Off"};  // RE4: both "on" modes use the picture before the HUD
@@ -475,7 +475,7 @@ void BeforePresentFsr() {
 }
 
 void LatencyTick();  // latency measurement, below
-std::string ProbeReport();  // input timing, below
+bool RefFrames();  // below
 
 void BeforePresent() {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
@@ -549,7 +549,7 @@ void LatencyTick() {
     if (g_lastPresentTick) g_frameTicks += now - g_lastPresentTick;
     g_lastPresentTick = now;
     if (g_secondViewFrames.exchange(0)) ++g_scopedFrames;
-    if (++g_latFrames < 300) return;
+    if (++g_latFrames < 1800) return;
     struct Avg {
         double sum = 0;
         uint32_t n = 0;
@@ -577,39 +577,36 @@ void LatencyTick() {
         }
     }
     const double frameMs = TicksMs(g_frameTicks, g_latFrames - 1);
-    Log("latency: frame %.2f ms (%.0f fps), Reflex wait %.2f ms/frame, %s; Reflex report (%u frames): frame start -> GPU "
-        "done %.2f ms, render start -> GPU done %.2f, render submit %.2f, present %.2f, OS queue %.2f, GPU render %.2f (active %.2f, GPU frame %.2f)%s; "
-        "Reflex %s, frame generation %s; scope view in %llu of %u frames",
-        frameMs, frameMs > 0 ? 1000.0 / frameMs : 0.0, TicksMs(g_sleepTicks, g_latFrames), g_fgOn ? "generating" : "not generating",
-        reports, simToGpu.Ms(), renderToGpu.Ms(), submit.Ms(), present.Ms(), queue.Ms(), gpu.Ms(), reports ? gpuActive / reports : 0.0,
-        reports ? gpuFrame / reports : 0.0, inputToGpu.n ? "" : " (no input marker)", kReflexNames[g_set.reflex],
-        kModeNames[g_appliedMode >= 0 ? g_appliedMode : kOff], static_cast<unsigned long long>(g_scopedFrames), g_latFrames);
-    Log("latency: Reflex wait on the game thread %.2f ms/frame (%s)", TicksMs(g_gameSleepTicks.exchange(0), g_latFrames),
-        g_gameReflexOn ? "active" : g_set.reflexAtInput ? "on, not active" : "off");
-    const std::string probe = ProbeReport();
-    if (!probe.empty()) Log("latency%s", probe.c_str());
+    const double gameWait = TicksMs(g_gameSleepTicks.exchange(0), g_latFrames);
+    Log("latency: %.0f fps (%.2f ms), Reflex %s waits %.2f ms/frame on the %s thread (frame starts from %s), input -> "
+        "GPU done %.1f ms (GPU %.1f ms), frame generation %s, scope view in %llu of %u frames",
+        frameMs > 0 ? 1000.0 / frameMs : 0.0, frameMs, kReflexNames[g_set.reflex], g_gameReflexOn ? gameWait : TicksMs(g_sleepTicks, g_latFrames),
+        g_gameReflexOn ? "game" : "render", RefFrames() ? "REFramework's input update" : g_gameReflexOn ? "the controller poll" : "the render thread",
+        simToGpu.Ms(), gpu.Ms(), kModeNames[g_appliedMode >= 0 ? g_appliedMode : kOff],
+        static_cast<unsigned long long>(g_scopedFrames), g_latFrames);
+    (void)renderToGpu, (void)submit, (void)present, (void)queue, (void)inputToGpu, (void)reports, (void)gpuFrame, (void)gpuActive;
     g_latFrames = 0, g_sleepTicks = 0, g_frameTicks = 0, g_scopedFrames = 0;
 }
 
-// ---------------------------------------------------------------- input timing probe
+// ---------------------------------------------------------------- Reflex at input
 //
-// Latency plan step 1b (2026-11-25): when the game reads input, against the render thread's
-// frame start (right after Reflex's wait). re4.exe imports XInputGetState by ordinal (XINPUT1_4
-// #2: the controller poll, once a game frame) and GetRawInputData (mouse and keyboard, per
-// message): their import entries are pointed at timestamping wrappers. Logged with the latency
-// line: which threads read input, how long before a frame start the last controller poll was, and
-// how often the game polled while Reflex held the render thread (the game thread running ahead).
+// Measured 2026-11-25 (RE4DLSS 1.4.6): the game reads input on its game thread right after the
+// render thread starts the previous frame, so with Reflex's wait on the render thread the wait sat
+// between reading a frame's input and drawing it. The wait now happens on the game thread at the
+// start of its frame, right before the engine's input update: the RE4DLSS_Reflex plugin for
+// REFramework calls RE4DLSS_GameFrameStart there (every input device); without it, the
+// controller poll (re4.exe imports XInputGetState by ordinal: XINPUT1_4 #2, once a game frame)
+// stands in; without either, the render thread waits as before. Tested: input -> GPU done about
+// 38 -> 24 ms in heavy scenes with frame generation 2x, frame rate unchanged.
 
 using XInputGetStateFn = DWORD(WINAPI*)(DWORD, void*);
-using GetRawInputDataFn = UINT(WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 XInputGetStateFn g_origXInputGetState = nullptr;
-GetRawInputDataFn g_origGetRawInputData = nullptr;
 bool g_inputHooksTried = false;
 
 constexpr uint32_t kPollRing = 256;
 std::atomic<int64_t> g_pollTimes[kPollRing];
 std::atomic<uint32_t> g_pollCount{0};
-std::atomic<uint32_t> g_pollThread{0}, g_rawThread{0}, g_rawCalls{0};
+std::atomic<uint32_t> g_pollThread{0};
 std::atomic<int64_t> g_sleepFrom{0}, g_sleepTo{0};  // the current Reflex wait (render thread)
 std::atomic<uint32_t> g_pollsInSleep{0};
 uint32_t g_renderThread = 0;
@@ -666,12 +663,6 @@ DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
     return r;
 }
 
-UINT WINAPI HookGetRawInputData(HRAWINPUT h, UINT cmd, LPVOID data, PUINT size, UINT header) {
-    g_rawThread = GetCurrentThreadId();
-    ++g_rawCalls;
-    return g_origGetRawInputData(h, cmd, data, size, header);
-}
-
 // Points one import of the game's exe at <hook> (by name, or by ordinal when name is null).
 bool PatchImport(const char* dllName, const char* name, WORD ordinal, void* hook, void** original) {
     auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
@@ -710,19 +701,13 @@ void InstallInputProbe() {
     if (!PatchImport("XINPUT1_4.dll", nullptr, 2, reinterpret_cast<void*>(&HookXInputGetState),
                      reinterpret_cast<void**>(&g_origXInputGetState)))
         g_origXInputGetState = nullptr;
-    if (!PatchImport("USER32.dll", "GetRawInputData", 0, reinterpret_cast<void*>(&HookGetRawInputData),
-                     reinterpret_cast<void**>(&g_origGetRawInputData)))
-        g_origGetRawInputData = nullptr;
-    Log("input timing probe: controller poll (XInputGetState) %s, raw input (GetRawInputData) %s; render thread %lu",
-        g_origXInputGetState ? "hooked" : "not found", g_origGetRawInputData ? "hooked" : "not found",
-        static_cast<unsigned long>(g_renderThread));
+    Log("Reflex at input: controller poll (XInputGetState) %s (fallback frame start); render thread %lu",
+        g_origXInputGetState ? "hooked" : "not found", static_cast<unsigned long>(g_renderThread));
 }
 
 // The add-on is unloading: the imports point back at the originals.
 void RemoveInputProbe() {
     if (g_origXInputGetState) PatchImport("XINPUT1_4.dll", nullptr, 2, reinterpret_cast<void*>(g_origXInputGetState), nullptr);
-    if (g_origGetRawInputData)
-        PatchImport("USER32.dll", "GetRawInputData", 0, reinterpret_cast<void*>(g_origGetRawInputData), nullptr);
 }
 
 // At each frame start on the render thread (after Reflex's wait): the polls since the last one.
@@ -738,25 +723,6 @@ void ProbeFrameStart(int64_t now) {
     }
     ++g_probeFrames;
     g_lastFrameStart = now;
-}
-
-// The probe's part of the latency line (then reset).
-std::string ProbeReport() {
-    if (!g_origXInputGetState && !g_origGetRawInputData) return "";
-    char buf[512];
-    const uint32_t pt = g_pollThread.load(), rt = g_rawThread.load();
-    snprintf(buf, sizeof(buf),
-             "; input: game frame starts (%s) %.2f/frame on thread %lu (%s), last one %.2f ms before the render thread's "
-             "frame start, during its Reflex wait %u; raw input %u calls on thread %lu (%s)",
-             RefFrames() ? "REFramework input update" : "controller poll",
-             g_probeFrames ? static_cast<double>(g_probePolls) / g_probeFrames : 0.0, static_cast<unsigned long>(pt),
-             pt == g_renderThread ? "the render thread" : "not the render thread",
-             g_probeFramesWithPoll ? g_probeLeadMs / g_probeFramesWithPoll : 0.0, g_pollsInSleep.exchange(0),
-             g_rawCalls.exchange(0), static_cast<unsigned long>(rt),
-             !rt ? "none" : rt == g_renderThread ? "the render thread" : rt == pt ? "the polling thread" : "another thread");
-    g_probeFrames = g_probeFramesWithPoll = g_probePolls = 0;
-    g_probeLeadMs = 0;
-    return buf;
 }
 
 void AfterPresent() {
@@ -1973,14 +1939,14 @@ void DrawFrameGenAdvanced() {
     }
     Help("How far apart in depth two things must be for DLSS frame generation to move them separately (NVIDIA's "
          "default 40). Lower it if people moving in front of walls ghost.");
-    if (ImGui::Checkbox("Reflex: wait before the game reads input (testing)", &g_set.reflexAtInput)) {
+    if (ImGui::Checkbox("Reflex: wait before the game reads input", &g_set.reflexAtInput)) {
         reshade::set_config_value(nullptr, RD_PRODUCT, "ReflexAtInput", g_set.reflexAtInput);
         Log("settings: Reflex wait before input %s", g_set.reflexAtInput ? "on" : "off");
     }
-    Help("With DLSS frame generation: Reflex's wait happens on the game's own thread right before it reads the "
-         "controller, instead of on the render thread after each frame (where the frame's input has already been "
-         "read). Should lower latency. Switches right away; falls back to the render thread when the game doesn't "
-         "poll the controller.");
+    Help("With DLSS frame generation (on by default): Reflex's wait happens on the game's own thread right before it "
+         "reads input (keyboard and mouse, controllers), through the RE4DLSS_Reflex plugin for REFramework, instead of on "
+         "the render thread after the game has already read the frame's input. In testing it cut the time from input to "
+         "the finished frame by about 14 ms. Off: the wait on the render thread, as before 1.4.6. Switches right away.");
 }
 
 std::string FrameGenHeadline(bool* warn) {

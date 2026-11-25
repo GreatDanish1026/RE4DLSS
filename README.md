@@ -1,4 +1,4 @@
-# RE4DLSS 1.4.5
+# RE4DLSS 1.4.6
 
 ReShade add-on for **Resident Evil 4** (the 2023 remake, RE Engine, DirectX 12) that puts
 **NVIDIA DLSS** or **AMD FSR 3.1 / FSR 4** in place of the game's FSR 2 upscaler, and adds
@@ -23,6 +23,11 @@ support, and REFramework for the render resolution dropdown.
   RTX 40/50; 3x and 4x need an RTX 50; with NVIDIA Reflex), or FSR 2x (any DirectX 12 card). It
   uses the game's depth, motion vectors and camera, and works with any of the upscalers, including
   the game's own FSR 2. Switching it on, or between DLSS and FSR, takes a game restart.
+- **Lower latency with DLSS frame generation** (1.4.6): Reflex's wait now happens right before
+  the game reads input (keyboard and mouse, controllers), through the bundled RE4DLSS_Reflex plugin
+  for REFramework, instead of after the game had already read the frame's input. In testing it
+  cut the time from input to the finished frame by about 14 ms (38 -> 24 ms, frame generation 2x)
+  at the same frame rate. **NVIDIA Reflex**: On, or On + Boost (keeps the GPU's clocks up).
 - **Render resolution**: Native (100%: DLAA, or FSR's native anti-aliasing), which the game's menu
   doesn't offer, or Quality (67%), Balanced (59%), Performance (50%) or Ultra Performance (33%).
   It sets the game's FSR 2 quality while upscaling is on (and keeps it there); "Game's FSR 2
@@ -59,7 +64,7 @@ Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShad
 
 ## Install
 
-**With Fluffy Mod Manager**: put `RE4DLSS-1.4.5.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
+**With Fluffy Mod Manager**: put `RE4DLSS-1.4.6.zip` in Fluffy Mod Manager's `Games\RE4R\Mods`
 folder (or drag it onto the manager) and enable it. It installs into the game folder:
 
 - `RE4DLSS.addon64` (the add-on), `nvngx_dlss.dll` and `nvngx_dlssd.dll` (NVIDIA's DLSS and
@@ -69,6 +74,8 @@ folder (or drag it onto the manager) and enable it. It installs into the game fo
 - `amd_fidelityfx_loader_dx12.dll`, `amd_fidelityfx_upscaler_dx12.dll` and
   `amd_fidelityfx_framegeneration_dx12.dll` (AMD's FSR runtime, SDK 2.4.0)
 - `reframework\autorun\RE4DLSS.lua` (sets the render size for the render resolution dropdown)
+- `reframework\plugins\RE4DLSS_Reflex.dll` (tells the add-on when the game reads input, for
+  Reflex with DLSS frame generation)
 - `RE4DLSS-README.md`, `RE4DLSS-THIRD_PARTY_NOTICES.txt`, `RE4DLSS-licenses\`
 
 **By hand**: copy the contents of the zip's `RE4DLSS` folder into the game folder (where
@@ -78,7 +85,8 @@ Then:
 
 1. ReShade 6.8 or later with full add-on support must be installed for `re4.exe` (DirectX 12).
 2. REFramework must be installed for the render resolution dropdown (without it, the game's FSR 2
-   quality setting picks the render size, and Native isn't available).
+   quality setting picks the render size, and Native isn't available) and for the lower-latency
+   Reflex timing (without it, Reflex works as before 1.4.6).
 3. In the game's graphics settings, turn **FidelityFX Super Resolution 2** on. With FSR 2 off
    (TAA), the add-on does nothing.
 4. Upscaling is on by default (DLSS on RTX cards, FSR otherwise); ReShade (Home), Add-ons tab,
@@ -98,7 +106,8 @@ If the NVIDIA App has a DLSS model override for the game, it takes precedence ov
   FSR 2; it keeps the game's FSR 2 while the main view gets DLSS or FSR 3/4. (Before 1.4.5 the
   add-on rebuilt DLSS for both views every frame while aiming it: slowdown, then a
   DXGI_ERROR_DEVICE_HUNG crash with Ray Reconstruction.) Frames where the game draws no new
-  main view while aiming it no longer switch frame generation off and on.
+  main view while aiming it no longer switch frame generation off and on. 1.4.6: any scope's
+  picture keeps FSR 2, whatever its size (only the game's largest view gets DLSS or FSR 3/4).
 - With upscaling off (F9) or the dropdown on "Game's FSR 2 setting", the script puts the game's
   FSR 2 quality back.
 - FSR 3.1/4 through this add-on is untested on Radeon cards so far.

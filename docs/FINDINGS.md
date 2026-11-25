@@ -141,3 +141,27 @@ compute pass lists: either no FSR 2 pass, or only the scope's): the game draws n
 8 such frames in a row paused frame generation, so it switched off and on several times a
 second; frame generation now pauses only after 30 (kPauseAfterUntagged). Tested: no pause while
 scoped. The diag line counts frames without a main view / hand-offs skipped and why.
+
+## 1.4.6: Reflex at input (2026-11-25)
+
+Measured with Reflex's own frame reports and timestamps of the game's input reads (XInputGetState is
+imported by ordinal, XINPUT1_4 #2, polled once a game frame on the game thread; raw mouse/keyboard
+input arrives per message on a separate thread). The game thread reads a frame's input right after
+the render thread starts the previous frame, a frame ahead; Reflex's wait on the render thread (6-12
+ms) therefore sat between reading the input and drawing it. GPU-bound at 4K (RTX 5080, RR, frame
+generation 2x): input -> GPU done about 35-39 ms in heavy scoped scenes; the scope and Reflex Boost
+made no measurable difference.
+
+1.4.6 does Reflex's wait (and the simulation-start / input markers) on the game thread at the start of
+its frame: RE4DLSS_Reflex.dll, a REFramework plugin, registers pre/post callbacks for the
+via.ModuleEntry "UpdateHID" (the engine's input update) and calls the add-on's exports
+RE4DLSS_GameFrameStart / RE4DLSS_GameInputRead; the controller poll is the fallback frame start,
+the render thread the last fallback (no frame start for 50 ms). The game thread then no longer runs a
+frame ahead (the render thread waits for it inside its frame, render submit +8 ms): input -> GPU done
+24-25 ms in the same scenes (Reflex report), about 9 ms instead of about 20 in light capped scenes,
+frame rate unchanged; controller and keyboard/mouse both tested, user: "felt snappier".
+Setting: Advanced, "Reflex: wait before the game reads input" (ini ReflexAtInput, on). Reflex mode:
+On / On + Boost (ini ReflexMode). The log has one latency line every 1800 frames.
+
+Also: the main view is now the largest FSR 2 output seen lately (any scope picture size keeps FSR 2),
+and ray tracing passes whose G-buffer isn't the main view's render size are left to the game.
