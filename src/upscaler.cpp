@@ -815,6 +815,23 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
     if (const uint32_t mainW = g_mainRenderW.load()) {
         const resource u0 = ComputeView(dev, s.compute, 0, true);
         if (u0.handle && dev->get_resource_desc(u0).texture.width * 3 < mainW) return false;
+        // rayTracingUpscale of another view (a scope's picture rendered larger, 1.4.6): its G-buffer
+        // isn't the main view's render size, so its camera and G-buffer aren't the main view's.
+        if (upscalePass) {
+            const resource base = ComputeView(dev, s.compute, kUpBase, false);
+            const uint32_t gw = base.handle ? dev->get_resource_desc(base).texture.width : 0;
+            if (gw && gw != mainW) {
+                static std::vector<uint32_t> logged;
+                static std::mutex m;
+                std::lock_guard<std::mutex> lock(m);
+                if (logged.size() < 16 && std::find(logged.begin(), logged.end(), gw) == logged.end()) {
+                    logged.push_back(gw);
+                    Log("ray tracing of another view (G-buffer width %u, main view's render width %u): left to the game", gw,
+                        mainW);
+                }
+                return false;
+            }
+        }
     }
     const uint64_t frame = g_presents.load();
     std::lock_guard<std::mutex> lock(g_rtMutex);
@@ -1444,6 +1461,10 @@ void DrawHudless(command_list* cl, ListState& s) {
 // DXGI_ERROR_DEVICE_HUNG aiming the scope; the long-open "biosensor scope" issue). Only the view
 // whose output is the screen's size gets DLSS/FSR 3/4 and frame generation; smaller ones keep FSR 2.
 // (g_backW, g_backH: the swap chain size, declared with g_mainRenderW above.)
+// 1.4.6: the main view is the one with the largest output seen in the last 60-120 frames (users:
+// the regular sniper scope still slowed the game down after 1.4.5, whose rule only caught views of
+// half the screen or less); any smaller view keeps FSR 2.
+std::atomic<uint64_t> g_viewAreaNow{0}, g_viewAreaBefore{0};  // largest output area, this / last window
 
 bool SecondaryView(command_list* cl, ListState& s) {
     const uint32_t bw = g_backW.load(), bh = g_backH.load();
@@ -1452,7 +1473,11 @@ bool SecondaryView(command_list* cl, ListState& s) {
     std::string how;
     if (!ReadFsrConstants(cl->get_device(), s.compute, cb, &how)) return false;
     const uint32_t outW = cb[kDisplaySize], outH = cb[kDisplaySize + 1];
-    const bool secondary = outW * 2 <= bw || outH * 2 <= bh;  // half the screen or less
+    const uint64_t area = static_cast<uint64_t>(outW) * outH;
+    uint64_t now = g_viewAreaNow.load();
+    while (area > now && !g_viewAreaNow.compare_exchange_weak(now, area)) {}
+    const uint64_t largest = std::max<uint64_t>(std::max<uint64_t>(now, area), g_viewAreaBefore.load());
+    const bool secondary = area < largest || outW * 2 <= bw || outH * 2 <= bh;
     if (!secondary) g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
     if (secondary) {
         // Each size once: the scope's view switches between two sizes from frame to frame.
@@ -1462,7 +1487,7 @@ bool SecondaryView(command_list* cl, ListState& s) {
         std::lock_guard<std::mutex> lock(m);
         if (logged.size() < 16 && std::find(logged.begin(), logged.end(), key) == logged.end()) {
             logged.push_back(key);
-            Log("a second FSR 2 view (%ux%u -> %ux%u, screen %ux%u; e.g. the biosensor scope): the game's FSR 2 kept "
+            Log("a second FSR 2 view (%ux%u -> %ux%u, screen %ux%u; e.g. a scope's picture): the game's FSR 2 kept "
                 "for it", cb[kRenderSize], cb[kRenderSize + 1], outW, outH, bw, bh);
         }
     }
@@ -1666,6 +1691,7 @@ void UpscalerPresent(swapchain* sc) {
         const uint32_t views = g_mainViewsThisFrame.exchange(0);
         if (views == 0) ++g_fgNoMainView;
         if (views > 1) ++g_fgTwoMainViews;
+        if (g_presents.load() % 60 == 0) g_viewAreaBefore = g_viewAreaNow.exchange(0);  // views can shrink
     }
     WriteWantedRt();
     WriteWantedQuality();
