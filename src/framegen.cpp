@@ -619,12 +619,18 @@ uint32_t g_probeFrames = 0, g_probeFramesWithPoll = 0, g_probePolls = 0, g_lastP
 double g_probeLeadMs = 0;
 int64_t g_lastFrameStart = 0;
 
-DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
+// The game thread starts a frame (REFramework's input update, else the controller poll): with
+// "Reflex at input", Reflex's wait for the frame it starts (g_frame + 1: measured 2026-11-25, the
+// game thread starts right after the render thread starts frame g_frame) and its start marker;
+// always, the probe's stamp. Returns the frame's token when it waited (for the input marker).
+std::atomic<int64_t> g_refFrameAt{0};  // when REFramework's input update last started a frame
+std::atomic<sl::FrameToken*> g_refToken{nullptr};
+bool g_refLogged = false;
+
+sl::FrameToken* GameFrameStart() {
     sl::FrameToken* gameToken = nullptr;
-    if (user == 0 && g_set.reflexAtInput && g_ready && !Fsr() && g_sl.reflexSleep && g_sl.pclSetMarker &&
+    if (g_set.reflexAtInput && g_ready && !Fsr() && g_sl.reflexSleep && g_sl.pclSetMarker &&
         GetCurrentThreadId() != g_renderThread) {
-        // The game thread starts frame g_frame + 1 here (measured 2026-11-25: it polls right after
-        // the render thread starts frame g_frame): Reflex's wait, then the frame's markers.
         uint32_t frame = g_frameNow.load() + 1;
         if (g_gameSleptFrame.exchange(frame) != frame && g_sl.getNewFrameToken(gameToken, &frame) == sl::Result::eOk &&
             gameToken) {
@@ -638,13 +644,23 @@ DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
             gameToken = nullptr;
         }
     }
-    if (user == 0) {  // the game polls each slot: one stamp per round
-        const int64_t t = Now();
-        const uint32_t i = g_pollCount.fetch_add(1);
-        g_pollTimes[i % kPollRing] = t;
-        g_pollThread = GetCurrentThreadId();
-        if (t >= g_sleepFrom.load() && g_sleepTo.load() < g_sleepFrom.load()) ++g_pollsInSleep;  // during the wait
-    }
+    const int64_t t = Now();
+    const uint32_t i = g_pollCount.fetch_add(1);
+    g_pollTimes[i % kPollRing] = t;
+    g_pollThread = GetCurrentThreadId();
+    if (t >= g_sleepFrom.load() && g_sleepTo.load() < g_sleepFrom.load()) ++g_pollsInSleep;  // during the render wait
+    return gameToken;
+}
+
+// REFramework's input update is the frame start while it runs (it covers every input device).
+bool RefFrames() {
+    const int64_t at = g_refFrameAt.load();
+    return at && TicksMs(Now() - at, 1) < 50;
+}
+
+DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
+    sl::FrameToken* gameToken = nullptr;
+    if (user == 0 && !RefFrames()) gameToken = GameFrameStart();  // the game polls each slot: once a round
     const DWORD r = g_origXInputGetState(user, state);
     if (gameToken) g_sl.pclSetMarker(sl::PCLMarker::eControllerInputSample, *gameToken);
     return r;
@@ -727,11 +743,12 @@ void ProbeFrameStart(int64_t now) {
 // The probe's part of the latency line (then reset).
 std::string ProbeReport() {
     if (!g_origXInputGetState && !g_origGetRawInputData) return "";
-    char buf[400];
+    char buf[512];
     const uint32_t pt = g_pollThread.load(), rt = g_rawThread.load();
     snprintf(buf, sizeof(buf),
-             "; input: controller polls %.2f/frame on thread %lu (%s), last poll %.2f ms before the frame start, polls "
-             "during Reflex's wait %u; raw input %u calls on thread %lu (%s)",
+             "; input: game frame starts (%s) %.2f/frame on thread %lu (%s), last one %.2f ms before the render thread's "
+             "frame start, during its Reflex wait %u; raw input %u calls on thread %lu (%s)",
+             RefFrames() ? "REFramework input update" : "controller poll",
              g_probeFrames ? static_cast<double>(g_probePolls) / g_probeFrames : 0.0, static_cast<unsigned long>(pt),
              pt == g_renderThread ? "the render thread" : "not the render thread",
              g_probeFramesWithPoll ? g_probeLeadMs / g_probeFramesWithPoll : 0.0, g_pollsInSleep.exchange(0),
@@ -2009,6 +2026,23 @@ void DrawFrameGenStatus() {
     ImGui::TextDisabled("Game frames %llu: with depth and motion %llu, with the picture before the HUD %llu",
                         static_cast<unsigned long long>(g_presents.load()), static_cast<unsigned long long>(g_tagged.load()),
                         static_cast<unsigned long long>(g_hudlessCount.load()));
+}
+
+
+// Called by RE4DLSS_Reflex.dll (REFramework plugin) on the game thread around the engine's input
+// update: the game's frame starts, and its input has been read.
+extern "C" __declspec(dllexport) void RE4DLSS_GameFrameStart() {
+    g_refFrameAt = Now();
+    if (!g_refLogged) {
+        g_refLogged = true;
+        Log("Reflex at input: frame start from REFramework's input update (RE4DLSS_Reflex plugin), thread %lu",
+            static_cast<unsigned long>(GetCurrentThreadId()));
+    }
+    g_refToken = GameFrameStart();
+}
+
+extern "C" __declspec(dllexport) void RE4DLSS_GameInputRead() {
+    if (sl::FrameToken* token = g_refToken.exchange(nullptr)) g_sl.pclSetMarker(sl::PCLMarker::eControllerInputSample, *token);
 }
 
 }  // namespace rd
