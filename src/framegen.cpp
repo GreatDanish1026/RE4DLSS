@@ -467,6 +467,7 @@ void BeforePresentFsr() {
 }
 
 void LatencyTick();  // latency measurement, below
+std::string ProbeReport();  // input timing, below
 
 void BeforePresent() {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
@@ -574,7 +575,140 @@ void LatencyTick() {
         reports, simToGpu.Ms(), submit.Ms(), present.Ms(), queue.Ms(), gpu.Ms(), reports ? gpuActive / reports : 0.0,
         reports ? gpuFrame / reports : 0.0, inputToGpu.n ? "" : " (no input marker)", kReflexNames[g_set.reflex],
         kModeNames[g_appliedMode >= 0 ? g_appliedMode : kOff], static_cast<unsigned long long>(g_scopedFrames), g_latFrames);
+    const std::string probe = ProbeReport();
+    if (!probe.empty()) Log("latency%s", probe.c_str());
     g_latFrames = 0, g_sleepTicks = 0, g_frameTicks = 0, g_scopedFrames = 0;
+}
+
+// ---------------------------------------------------------------- input timing probe
+//
+// Latency plan step 1b (2026-11-25): when the game reads input, against the render thread's
+// frame start (right after Reflex's wait). re4.exe imports XInputGetState by ordinal (XINPUT1_4
+// #2: the controller poll, once a game frame) and GetRawInputData (mouse and keyboard, per
+// message): their import entries are pointed at timestamping wrappers. Logged with the latency
+// line: which threads read input, how long before a frame start the last controller poll was, and
+// how often the game polled while Reflex held the render thread (the game thread running ahead).
+
+using XInputGetStateFn = DWORD(WINAPI*)(DWORD, void*);
+using GetRawInputDataFn = UINT(WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
+XInputGetStateFn g_origXInputGetState = nullptr;
+GetRawInputDataFn g_origGetRawInputData = nullptr;
+bool g_inputHooksTried = false;
+
+constexpr uint32_t kPollRing = 256;
+std::atomic<int64_t> g_pollTimes[kPollRing];
+std::atomic<uint32_t> g_pollCount{0};
+std::atomic<uint32_t> g_pollThread{0}, g_rawThread{0}, g_rawCalls{0};
+std::atomic<int64_t> g_sleepFrom{0}, g_sleepTo{0};  // the current Reflex wait (render thread)
+std::atomic<uint32_t> g_pollsInSleep{0};
+uint32_t g_renderThread = 0;
+// Per latency window (render thread): frames with a poll since the last frame start, the sum of
+// (frame start - last poll), polls.
+uint32_t g_probeFrames = 0, g_probeFramesWithPoll = 0, g_probePolls = 0, g_lastPollIndex = 0;
+double g_probeLeadMs = 0;
+int64_t g_lastFrameStart = 0;
+
+DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
+    if (user == 0) {  // the game polls each slot: one stamp per round
+        const int64_t t = Now();
+        const uint32_t i = g_pollCount.fetch_add(1);
+        g_pollTimes[i % kPollRing] = t;
+        g_pollThread = GetCurrentThreadId();
+        if (t >= g_sleepFrom.load() && g_sleepTo.load() < g_sleepFrom.load()) ++g_pollsInSleep;  // during the wait
+    }
+    return g_origXInputGetState(user, state);
+}
+
+UINT WINAPI HookGetRawInputData(HRAWINPUT h, UINT cmd, LPVOID data, PUINT size, UINT header) {
+    g_rawThread = GetCurrentThreadId();
+    ++g_rawCalls;
+    return g_origGetRawInputData(h, cmd, data, size, header);
+}
+
+// Points one import of the game's exe at <hook> (by name, or by ordinal when name is null).
+bool PatchImport(const char* dllName, const char* name, WORD ordinal, void* hook, void** original) {
+    auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress) return false;
+    for (auto* d = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); d->Name; ++d) {
+        if (_stricmp(reinterpret_cast<const char*>(base + d->Name), dllName) != 0) continue;
+        auto* names = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + (d->OriginalFirstThunk ? d->OriginalFirstThunk : d->FirstThunk));
+        auto* slots = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + d->FirstThunk);
+        for (; names->u1.AddressOfData; ++names, ++slots) {
+            bool match;
+            if (IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal)) {
+                match = !name && IMAGE_ORDINAL64(names->u1.Ordinal) == ordinal;
+            } else {
+                auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
+                match = name && strcmp(reinterpret_cast<const char*>(byName->Name), name) == 0;
+            }
+            if (!match) continue;
+            DWORD old = 0;
+            if (!VirtualProtect(&slots->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) return false;
+            if (original) *original = reinterpret_cast<void*>(slots->u1.Function);  // before any call can reach hook
+            slots->u1.Function = reinterpret_cast<ULONGLONG>(hook);
+            VirtualProtect(&slots->u1.Function, sizeof(void*), old, &old);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Once, on the render thread at the first frame start.
+void InstallInputProbe() {
+    g_inputHooksTried = true;
+    g_renderThread = GetCurrentThreadId();
+    if (!PatchImport("XINPUT1_4.dll", nullptr, 2, reinterpret_cast<void*>(&HookXInputGetState),
+                     reinterpret_cast<void**>(&g_origXInputGetState)))
+        g_origXInputGetState = nullptr;
+    if (!PatchImport("USER32.dll", "GetRawInputData", 0, reinterpret_cast<void*>(&HookGetRawInputData),
+                     reinterpret_cast<void**>(&g_origGetRawInputData)))
+        g_origGetRawInputData = nullptr;
+    Log("input timing probe: controller poll (XInputGetState) %s, raw input (GetRawInputData) %s; render thread %lu",
+        g_origXInputGetState ? "hooked" : "not found", g_origGetRawInputData ? "hooked" : "not found",
+        static_cast<unsigned long>(g_renderThread));
+}
+
+// The add-on is unloading: the imports point back at the originals.
+void RemoveInputProbe() {
+    if (g_origXInputGetState) PatchImport("XINPUT1_4.dll", nullptr, 2, reinterpret_cast<void*>(g_origXInputGetState), nullptr);
+    if (g_origGetRawInputData)
+        PatchImport("USER32.dll", "GetRawInputData", 0, reinterpret_cast<void*>(g_origGetRawInputData), nullptr);
+}
+
+// At each frame start on the render thread (after Reflex's wait): the polls since the last one.
+void ProbeFrameStart(int64_t now) {
+    const uint32_t count = g_pollCount.load();
+    if (count != g_lastPollIndex) {
+        const uint32_t n = count - g_lastPollIndex;
+        g_probePolls += n;
+        ++g_probeFramesWithPoll;
+        const int64_t last = g_pollTimes[(count - 1) % kPollRing].load();
+        g_probeLeadMs += TicksMs(now - last, 1);
+        g_lastPollIndex = count;
+    }
+    ++g_probeFrames;
+    g_lastFrameStart = now;
+}
+
+// The probe's part of the latency line (then reset).
+std::string ProbeReport() {
+    if (!g_origXInputGetState && !g_origGetRawInputData) return "";
+    char buf[400];
+    const uint32_t pt = g_pollThread.load(), rt = g_rawThread.load();
+    snprintf(buf, sizeof(buf),
+             "; input: controller polls %.2f/frame on thread %lu (%s), last poll %.2f ms before the frame start, polls "
+             "during Reflex's wait %u; raw input %u calls on thread %lu (%s)",
+             g_probeFrames ? static_cast<double>(g_probePolls) / g_probeFrames : 0.0, static_cast<unsigned long>(pt),
+             pt == g_renderThread ? "the render thread" : "not the render thread",
+             g_probeFramesWithPoll ? g_probeLeadMs / g_probeFramesWithPoll : 0.0, g_pollsInSleep.exchange(0),
+             g_rawCalls.exchange(0), static_cast<unsigned long>(rt),
+             !rt ? "none" : rt == g_renderThread ? "the render thread" : rt == pt ? "the polling thread" : "another thread");
+    g_probeFrames = g_probeFramesWithPoll = g_probePolls = 0;
+    g_probeLeadMs = 0;
+    return buf;
 }
 
 void AfterPresent() {
@@ -593,11 +727,16 @@ void AfterPresent() {
     }
     // The add-on only runs on the render thread: the next frame starts here. Reflex's sleep
     // runs without the lock (the overlay and the TSR hook take it).
+    if (!g_inputHooksTried) InstallInputProbe();
     const int64_t sleepStart = Now();
+    g_sleepFrom = sleepStart;
     if (g_sl.reflexSleep) g_sl.reflexSleep(*token);
+    const int64_t sleepEnd = Now();
+    g_sleepTo = sleepEnd;
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
-        g_sleepTicks += Now() - sleepStart;
+        g_sleepTicks += sleepEnd - sleepStart;
+        ProbeFrameStart(sleepEnd);
     }
     g_sl.pclSetMarker(sl::PCLMarker::eSimulationStart, *token);
     g_sl.pclSetMarker(sl::PCLMarker::eSimulationEnd, *token);
@@ -1701,6 +1840,7 @@ void UnregisterFrameGen() {
     reshade::unregister_event<reshade::addon_event::reset_command_list>(&OnResetList);
     reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(&OnBindRenderTargets);
     Unpatch();  // this add-on's code is about to go away
+    RemoveInputProbe();
 }
 
 void DrawFrameGenSettings() {
