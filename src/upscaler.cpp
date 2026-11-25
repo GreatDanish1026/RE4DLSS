@@ -1480,6 +1480,7 @@ bool SecondaryView(command_list* cl, ListState& s) {
     const bool secondary = area < largest || outW * 2 <= bw || outH * 2 <= bh;
     if (!secondary) g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
     if (secondary) {
+        FrameGenNoteSecondView();
         // Each size once: the scope's view switches between two sizes from frame to frame.
         static std::mutex m;
         static std::vector<uint64_t> logged;

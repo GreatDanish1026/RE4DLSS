@@ -51,6 +51,7 @@ void DrawFrameGenStatus();
 void DrawFrameGenAdvanced();  // DLSS-G object separation, FSR HUD protection
 std::string FrameGenHeadline(bool* warn);
 std::string FrameGenDiag();  // inputs tagged / frames without them since the last call, and why
+void FrameGenNoteSecondView();  // a scope's own FSR 2 view ran this frame (latency log: scoped or not)
 // True while frame generation wants each frame's camera (the upscaler then looks for SceneInfo).
 bool FrameGenWantsCamera();
 // RE Engine's SceneInfo constant buffer (kSceneInfoBytes) of the frame's main view.

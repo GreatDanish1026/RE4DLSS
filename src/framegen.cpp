@@ -466,6 +466,8 @@ void BeforePresentFsr() {
     g_fgOn = running;
 }
 
+void LatencyTick();  // latency measurement, below
+
 void BeforePresent() {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     if (!g_ready) return;
@@ -501,7 +503,78 @@ void BeforePresent() {
         }
     }
     CheckUiRow();
+    LatencyTick();
     Marker(sl::PCLMarker::ePresentStart);
+}
+
+// ---------------------------------------------------------------- latency measurement
+//
+// Every 300 game frames: averages from Reflex's own per-frame reports (slReflexGetState: times in
+// microseconds for each marker, the driver, the OS queue and the GPU), how long Reflex held the
+// render thread, the frame time, and whether a scope's view ran. Note: the add-on marks the
+// game's "simulation" on the render thread right after Reflex's wait (it has no hook in the game
+// thread), so "simulation start" is when the render thread starts a frame, not when the game read
+// input: the game thread's lead isn't in these numbers (step 2 of the latency plan, 2026-11-25).
+
+LARGE_INTEGER g_qpcFreq{};
+int64_t g_sleepTicks = 0;      // in Reflex's wait, this window
+int64_t g_lastPresentTick = 0, g_frameTicks = 0;
+uint32_t g_latFrames = 0;      // presents this window
+std::atomic<uint32_t> g_secondViewFrames{0};
+uint64_t g_lastSecondViewPresent = 0, g_scopedFrames = 0;
+
+int64_t Now() {
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return t.QuadPart;
+}
+
+double TicksMs(int64_t ticks, uint32_t n) {
+    if (!g_qpcFreq.QuadPart) QueryPerformanceFrequency(&g_qpcFreq);
+    return n ? 1000.0 * static_cast<double>(ticks) / static_cast<double>(g_qpcFreq.QuadPart) / n : 0;
+}
+
+// At each present (g_mutex held): frame time, scope views; every 300 frames, the report.
+void LatencyTick() {
+    const int64_t now = Now();
+    if (g_lastPresentTick) g_frameTicks += now - g_lastPresentTick;
+    g_lastPresentTick = now;
+    if (g_secondViewFrames.exchange(0)) ++g_scopedFrames;
+    if (++g_latFrames < 300) return;
+    struct Avg {
+        double sum = 0;
+        uint32_t n = 0;
+        void Add(uint64_t a, uint64_t b) {
+            if (a && b > a && b - a < 1000000) sum += static_cast<double>(b - a), ++n;
+        }
+        double Ms() const { return n ? sum / n / 1000.0 : 0; }
+    } simToGpu, submit, present, queue, gpu, inputToGpu;
+    double gpuFrame = 0, gpuActive = 0;
+    uint32_t reports = 0;
+    static sl::ReflexState rs;  // 64 reports: too big for the stack comfortably
+    rs = sl::ReflexState{};
+    if (g_sl.reflexGetState && g_sl.reflexGetState(rs) == sl::Result::eOk && rs.latencyReportAvailable) {
+        for (const sl::ReflexReport& r : rs.frameReport) {
+            if (!r.frameID || !r.gpuRenderEndTime) continue;
+            ++reports;
+            simToGpu.Add(r.simStartTime, r.gpuRenderEndTime);
+            submit.Add(r.renderSubmitStartTime, r.renderSubmitEndTime);
+            present.Add(r.presentStartTime, r.presentEndTime);
+            queue.Add(r.osRenderQueueStartTime, r.osRenderQueueEndTime);
+            gpu.Add(r.gpuRenderStartTime, r.gpuRenderEndTime);
+            inputToGpu.Add(r.inputSampleTime, r.gpuRenderEndTime);
+            gpuFrame += r.gpuFrameTimeUs / 1000.0, gpuActive += r.gpuActiveRenderTimeUs / 1000.0;
+        }
+    }
+    const double frameMs = TicksMs(g_frameTicks, g_latFrames - 1);
+    Log("latency: frame %.2f ms (%.0f fps), Reflex wait %.2f ms/frame, %s; Reflex report (%u frames): frame start -> GPU "
+        "done %.2f ms, render submit %.2f, present %.2f, OS queue %.2f, GPU render %.2f (active %.2f, GPU frame %.2f)%s; "
+        "Reflex %s, frame generation %s; scope view in %llu of %u frames",
+        frameMs, frameMs > 0 ? 1000.0 / frameMs : 0.0, TicksMs(g_sleepTicks, g_latFrames), g_fgOn ? "generating" : "not generating",
+        reports, simToGpu.Ms(), submit.Ms(), present.Ms(), queue.Ms(), gpu.Ms(), reports ? gpuActive / reports : 0.0,
+        reports ? gpuFrame / reports : 0.0, inputToGpu.n ? "" : " (no input marker)", kReflexNames[g_set.reflex],
+        kModeNames[g_appliedMode >= 0 ? g_appliedMode : kOff], static_cast<unsigned long long>(g_scopedFrames), g_latFrames);
+    g_latFrames = 0, g_sleepTicks = 0, g_frameTicks = 0, g_scopedFrames = 0;
 }
 
 void AfterPresent() {
@@ -520,7 +593,12 @@ void AfterPresent() {
     }
     // The add-on only runs on the render thread: the next frame starts here. Reflex's sleep
     // runs without the lock (the overlay and the TSR hook take it).
+    const int64_t sleepStart = Now();
     if (g_sl.reflexSleep) g_sl.reflexSleep(*token);
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        g_sleepTicks += Now() - sleepStart;
+    }
     g_sl.pclSetMarker(sl::PCLMarker::eSimulationStart, *token);
     g_sl.pclSetMarker(sl::PCLMarker::eSimulationEnd, *token);
     g_sl.pclSetMarker(sl::PCLMarker::eRenderSubmitStart, *token);
@@ -1439,6 +1517,7 @@ std::string FrameGenDiag() {
 }
 
 bool FrameGenWantsCamera() { return g_set.enabled && g_ready; }
+void FrameGenNoteSecondView() { g_secondViewFrames = 1; }
 
 bool FrameGenWantsHudless() {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
