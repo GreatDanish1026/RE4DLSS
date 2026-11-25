@@ -85,6 +85,9 @@ struct Settings {
     // NVIDIA Reflex with DLSS frame generation (which needs it on): 0 low latency, 1 low latency +
     // boost (keeps the GPU's clocks up when the CPU limits). ini ReflexMode.
     int reflex = 0;
+    // Reflex's wait on the game thread, right before it reads input (the controller poll), instead
+    // of on the render thread after each present (latency plan step 2, 2026-11-25). ini ReflexAtInput.
+    bool reflexAtInput = false;
 } g_set;
 const char* const kReflexNames[] = {"On", "On + Boost"};
 const char* const kFsrHudNames[] = {"On (recommended)", "On", "Off"};  // RE4: both "on" modes use the picture before the HUD
@@ -126,6 +129,11 @@ std::string g_status = "off";
 // Frames: the token of the frame being submitted; it advances after each game present.
 sl::FrameToken* g_token = nullptr;
 uint32_t g_frame = 0;
+std::atomic<uint32_t> g_frameNow{0};  // g_frame, for the game thread (Reflex at input)
+// Reflex at input: the frame the game thread last waited for, when, and its wait time this window.
+std::atomic<uint32_t> g_gameSleptFrame{UINT32_MAX};
+std::atomic<int64_t> g_gameSleptAt{0}, g_gameSleepTicks{0};
+bool g_gameReflexOn = false;  // the render thread's view: the game thread is doing the wait
 // The last two frames given each kind of input.
 struct Tagged {
     uint32_t last = UINT32_MAX, previous = UINT32_MAX;
@@ -549,7 +557,7 @@ void LatencyTick() {
             if (a && b > a && b - a < 1000000) sum += static_cast<double>(b - a), ++n;
         }
         double Ms() const { return n ? sum / n / 1000.0 : 0; }
-    } simToGpu, submit, present, queue, gpu, inputToGpu;
+    } simToGpu, submit, present, queue, gpu, inputToGpu, renderToGpu;
     double gpuFrame = 0, gpuActive = 0;
     uint32_t reports = 0;
     static sl::ReflexState rs;  // 64 reports: too big for the stack comfortably
@@ -559,6 +567,7 @@ void LatencyTick() {
             if (!r.frameID || !r.gpuRenderEndTime) continue;
             ++reports;
             simToGpu.Add(r.simStartTime, r.gpuRenderEndTime);
+            renderToGpu.Add(r.renderSubmitStartTime, r.gpuRenderEndTime);
             submit.Add(r.renderSubmitStartTime, r.renderSubmitEndTime);
             present.Add(r.presentStartTime, r.presentEndTime);
             queue.Add(r.osRenderQueueStartTime, r.osRenderQueueEndTime);
@@ -569,12 +578,14 @@ void LatencyTick() {
     }
     const double frameMs = TicksMs(g_frameTicks, g_latFrames - 1);
     Log("latency: frame %.2f ms (%.0f fps), Reflex wait %.2f ms/frame, %s; Reflex report (%u frames): frame start -> GPU "
-        "done %.2f ms, render submit %.2f, present %.2f, OS queue %.2f, GPU render %.2f (active %.2f, GPU frame %.2f)%s; "
+        "done %.2f ms, render start -> GPU done %.2f, render submit %.2f, present %.2f, OS queue %.2f, GPU render %.2f (active %.2f, GPU frame %.2f)%s; "
         "Reflex %s, frame generation %s; scope view in %llu of %u frames",
         frameMs, frameMs > 0 ? 1000.0 / frameMs : 0.0, TicksMs(g_sleepTicks, g_latFrames), g_fgOn ? "generating" : "not generating",
-        reports, simToGpu.Ms(), submit.Ms(), present.Ms(), queue.Ms(), gpu.Ms(), reports ? gpuActive / reports : 0.0,
+        reports, simToGpu.Ms(), renderToGpu.Ms(), submit.Ms(), present.Ms(), queue.Ms(), gpu.Ms(), reports ? gpuActive / reports : 0.0,
         reports ? gpuFrame / reports : 0.0, inputToGpu.n ? "" : " (no input marker)", kReflexNames[g_set.reflex],
         kModeNames[g_appliedMode >= 0 ? g_appliedMode : kOff], static_cast<unsigned long long>(g_scopedFrames), g_latFrames);
+    Log("latency: Reflex wait on the game thread %.2f ms/frame (%s)", TicksMs(g_gameSleepTicks.exchange(0), g_latFrames),
+        g_gameReflexOn ? "active" : g_set.reflexAtInput ? "on, not active" : "off");
     const std::string probe = ProbeReport();
     if (!probe.empty()) Log("latency%s", probe.c_str());
     g_latFrames = 0, g_sleepTicks = 0, g_frameTicks = 0, g_scopedFrames = 0;
@@ -609,6 +620,24 @@ double g_probeLeadMs = 0;
 int64_t g_lastFrameStart = 0;
 
 DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
+    sl::FrameToken* gameToken = nullptr;
+    if (user == 0 && g_set.reflexAtInput && g_ready && !Fsr() && g_sl.reflexSleep && g_sl.pclSetMarker &&
+        GetCurrentThreadId() != g_renderThread) {
+        // The game thread starts frame g_frame + 1 here (measured 2026-11-25: it polls right after
+        // the render thread starts frame g_frame): Reflex's wait, then the frame's markers.
+        uint32_t frame = g_frameNow.load() + 1;
+        if (g_gameSleptFrame.exchange(frame) != frame && g_sl.getNewFrameToken(gameToken, &frame) == sl::Result::eOk &&
+            gameToken) {
+            const int64_t from = Now();
+            g_sl.reflexSleep(*gameToken);
+            const int64_t to = Now();
+            g_gameSleepTicks += to - from;
+            g_gameSleptAt = to;
+            g_sl.pclSetMarker(sl::PCLMarker::eSimulationStart, *gameToken);
+        } else {
+            gameToken = nullptr;
+        }
+    }
     if (user == 0) {  // the game polls each slot: one stamp per round
         const int64_t t = Now();
         const uint32_t i = g_pollCount.fetch_add(1);
@@ -616,7 +645,9 @@ DWORD WINAPI HookXInputGetState(DWORD user, void* state) {
         g_pollThread = GetCurrentThreadId();
         if (t >= g_sleepFrom.load() && g_sleepTo.load() < g_sleepFrom.load()) ++g_pollsInSleep;  // during the wait
     }
-    return g_origXInputGetState(user, state);
+    const DWORD r = g_origXInputGetState(user, state);
+    if (gameToken) g_sl.pclSetMarker(sl::PCLMarker::eControllerInputSample, *gameToken);
+    return r;
 }
 
 UINT WINAPI HookGetRawInputData(HRAWINPUT h, UINT cmd, LPVOID data, PUINT size, UINT header) {
@@ -724,13 +755,22 @@ void AfterPresent() {
         const uint32_t next = g_frame + 1;
         if (g_sl.getNewFrameToken(token, &next) != sl::Result::eOk || !token) return;
         g_token = token, g_frame = next;
+        g_frameNow = next;
     }
     // The add-on only runs on the render thread: the next frame starts here. Reflex's sleep
     // runs without the lock (the overlay and the TSR hook take it).
     if (!g_inputHooksTried) InstallInputProbe();
+    // Reflex at input: the game thread waited for one of the last frames within 50 ms; else (no
+    // controller polls, e.g. menus that don't poll) the render thread waits, as before.
     const int64_t sleepStart = Now();
+    const int64_t gameAt = g_gameSleptAt.load();
+    const bool gameWaits = g_set.reflexAtInput && gameAt && TicksMs(sleepStart - gameAt, 1) < 50;
+    if (gameWaits != g_gameReflexOn) {
+        g_gameReflexOn = gameWaits;
+        Log("Reflex wait: %s", gameWaits ? "on the game thread, before it reads input" : "on the render thread");
+    }
     g_sleepFrom = sleepStart;
-    if (g_sl.reflexSleep) g_sl.reflexSleep(*token);
+    if (g_sl.reflexSleep && !gameWaits) g_sl.reflexSleep(*token);
     const int64_t sleepEnd = Now();
     g_sleepTo = sleepEnd;
     {
@@ -738,7 +778,7 @@ void AfterPresent() {
         g_sleepTicks += sleepEnd - sleepStart;
         ProbeFrameStart(sleepEnd);
     }
-    g_sl.pclSetMarker(sl::PCLMarker::eSimulationStart, *token);
+    if (!gameWaits) g_sl.pclSetMarker(sl::PCLMarker::eSimulationStart, *token);  // else: the game thread's
     g_sl.pclSetMarker(sl::PCLMarker::eSimulationEnd, *token);
     g_sl.pclSetMarker(sl::PCLMarker::eRenderSubmitStart, *token);
 }
@@ -1809,6 +1849,7 @@ void RegisterFrameGen() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrHudMode", g_set.fsrHud);
     if (g_set.fsrHud < 0 || g_set.fsrHud >= fsrfg::kHudModeCount) g_set.fsrHud = fsrfg::kHudComposite;
     reshade::get_config_value(nullptr, RD_PRODUCT, "ReflexMode", g_set.reflex);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "ReflexAtInput", g_set.reflexAtInput);
     if (g_set.reflex < 0 || g_set.reflex > 1) g_set.reflex = 0;
     g_activeTech = g_set.tech;  // until the next launch
     g_set.enabled = g_set.mode != kOff && kTsrMapped;  // needs the upscaler, which needs TSR mapped
@@ -1915,6 +1956,14 @@ void DrawFrameGenAdvanced() {
     }
     Help("How far apart in depth two things must be for DLSS frame generation to move them separately (NVIDIA's "
          "default 40). Lower it if people moving in front of walls ghost.");
+    if (ImGui::Checkbox("Reflex: wait before the game reads input (testing)", &g_set.reflexAtInput)) {
+        reshade::set_config_value(nullptr, RD_PRODUCT, "ReflexAtInput", g_set.reflexAtInput);
+        Log("settings: Reflex wait before input %s", g_set.reflexAtInput ? "on" : "off");
+    }
+    Help("With DLSS frame generation: Reflex's wait happens on the game's own thread right before it reads the "
+         "controller, instead of on the render thread after each frame (where the frame's input has already been "
+         "read). Should lower latency. Switches right away; falls back to the render thread when the game doesn't "
+         "poll the controller.");
 }
 
 std::string FrameGenHeadline(bool* warn) {
