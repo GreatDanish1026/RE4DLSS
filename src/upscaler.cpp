@@ -387,6 +387,24 @@ void OnBarrier(command_list* cl, uint32_t count, const resource* res, const reso
     (void)before;
 }
 
+// Right size, a view-projection matrix, unit view axes (transposeViewInvMat, floats 28-39) and a
+// near plane: another buffer with the same screen size but zero matrices exists too.
+bool LooksLikeSceneInfo(const float* f, uint32_t w, uint32_t h) {
+    if (!w || !h) return false;
+    const auto axis = [&](int c) { return f[28 + c] * f[28 + c] + f[32 + c] * f[32 + c] + f[36 + c] * f[36 + c]; };
+    return f[kScreenSizeFloat] == static_cast<float>(w) && f[kScreenSizeFloat + 1] == static_cast<float>(h) &&
+           std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f &&
+           std::fabs(f[0]) + std::fabs(f[5]) > 1e-3f && std::fabs(axis(0) - 1) < 1e-2f && std::fabs(axis(1) - 1) < 1e-2f &&
+           f[98] > 0 &&
+           // projection x scale (view x axis . viewProj column 0) positive: not the mirrored second
+           // view the game also draws at this size
+           f[28] * f[0] + f[32] * f[4] + f[36] * f[8] > 0.05f;
+}
+
+// Present count when REFramework's path tracing pass was last seen (Ray Reconstruction section).
+std::atomic<uint64_t> g_ptFrame{UINT64_MAX};
+void RtSceneFromSearch(const float* f);  // Ray Reconstruction section
+
 // Is this constant buffer SceneInfo (screenSize = the render size, 1 / screenSize after it)? Keeps
 // a copy on the list if so. Each buffer range is looked at once per list.
 void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
@@ -403,23 +421,16 @@ void CheckSceneInfo(command_list* cl, ListState& s, const buffer_range& r) {
     if (d.heap == memory_heap::default_ && !g_trackCopies.load(std::memory_order_relaxed)) return;
     float f[kSceneInfoBytes / 4];
     if (!ReadBuffer(dev, r, kSceneInfoBytes, f, nullptr)) return;
-    // Right size, a view-projection matrix, unit view axes (transposeViewInvMat, floats 28-39) and
-    // a near plane: another buffer with the same screen size but zero matrices exists too.
-    const auto axis = [&](int c) { return f[28 + c] * f[28 + c] + f[32 + c] * f[32 + c] + f[36 + c] * f[36 + c]; };
-    const bool match = f[kScreenSizeFloat] == static_cast<float>(w) && f[kScreenSizeFloat + 1] == static_cast<float>(h) &&
-                       std::fabs(f[kScreenSizeFloat + 2] * w - 1) < 1e-3f && std::fabs(f[kScreenSizeFloat + 3] * h - 1) < 1e-3f &&
-                       std::fabs(f[0]) + std::fabs(f[5]) > 1e-3f && std::fabs(axis(0) - 1) < 1e-2f &&
-                       std::fabs(axis(1) - 1) < 1e-2f && f[98] > 0 &&
-                       // projection x scale (view x axis . viewProj column 0) positive: not the mirrored
-                       // second view the game also draws at this size
-                       f[28] * f[0] + f[32] * f[4] + f[36] * f[8] > 0.05f;
-    if (!match) return;
+    if (!LooksLikeSceneInfo(f, w, h)) return;
     memcpy(s.scene, f, kSceneInfoBytes);
     s.sceneValid = true;
-    std::lock_guard<std::mutex> lock(g_sceneMutex);
-    memcpy(g_lastScene, s.scene, kSceneInfoBytes);
-    g_lastSceneValid = true;
-    if (++g_scenesFound == 1) Log("frame generation: SceneInfo found (%ux%u, buffer heap %d)", w, h, static_cast<int>(d.heap));
+    {
+        std::lock_guard<std::mutex> lock(g_sceneMutex);
+        memcpy(g_lastScene, s.scene, kSceneInfoBytes);
+        g_lastSceneValid = true;
+        if (++g_scenesFound == 1) Log("SceneInfo found by search (%ux%u, buffer heap %d)", w, h, static_cast<int>(d.heap));
+    }
+    RtSceneFromSearch(f);  // path tracing: Ray Reconstruction's camera when the pass's own b0 wasn't it
 }
 void OnDestroyList(command_list* cl) { cl->destroy_private_data<ListState>(); }
 
@@ -456,10 +467,15 @@ void OnPushDescriptors(command_list* cl, shader_stage stages, pipeline_layout la
     if (u.type == descriptor_type::constant_buffer || u.type == descriptor_type::buffer_shader_resource_view ||
         u.type == descriptor_type::buffer_unordered_access_view)
         st->roots[param] = {stages, u.type, *static_cast<const buffer_range*>(u.descriptors)};
-    if (u.type == descriptor_type::constant_buffer && FrameGenWantsCamera()) {
+    if (u.type == descriptor_type::constant_buffer) {
+        const uint64_t now = g_presents.load(std::memory_order_relaxed);
         const uint64_t seen = g_rtSceneSeen.load(std::memory_order_relaxed);
-        if (seen == UINT64_MAX || seen + 30 < g_presents.load(std::memory_order_relaxed))  // not ray tracing: search
-            CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
+        const uint64_t pt = g_ptFrame.load(std::memory_order_relaxed);
+        // Frame generation when not ray tracing; or path tracing with Ray Reconstruction when the
+        // path tracing pass's own b0 didn't give this frame's camera.
+        const bool fg = FrameGenWantsCamera() && (seen == UINT64_MAX || seen + 30 < now);
+        const bool ptCam = g_set.rr && g_set.enabled && pt != UINT64_MAX && pt + 30 >= now && seen != now;
+        if (fg || ptCam) CheckSceneInfo(cl, *s, *static_cast<const buffer_range*>(u.descriptors));
     }
 }
 
@@ -673,6 +689,21 @@ struct RtState {
     int denseVotes = 0;
 } g_rt;
 
+// A SceneInfo the search found (CheckSceneInfo): Ray Reconstruction's camera for this frame while
+// path tracing, when the path tracing pass's own b0 didn't give one.
+void RtSceneFromSearch(const float* f) {
+    const uint64_t frame = g_presents.load();
+    const uint64_t pt = g_ptFrame.load();
+    if (pt == UINT64_MAX || pt + 30 < frame) return;
+    std::lock_guard<std::mutex> lock(g_rtMutex);
+    if (g_rt.sceneFrame == frame) return;
+    memcpy(g_rt.scene, f, sizeof(g_rt.scene));
+    g_rt.sceneFrame = frame;
+    g_rtSceneSeen = frame;
+    static bool logged = false;
+    if (!logged) logged = true, Log("Ray Reconstruction: camera from the SceneInfo search (path tracing)");
+}
+
 // The screen size (at each present) and the main FSR 2 view's render width (SecondaryView): a
 // second view (the biosensor scope) is told apart by them.
 std::atomic<uint32_t> g_backW{0}, g_backH{0}, g_mainRenderW{0};
@@ -802,6 +833,51 @@ bool RtCopy(command_list* cl, resource src, resource dst) {
     return true;
 }
 
+// REFramework's path tracing (Graphics > Ray Tracing Tweaks: Pure / Hybrid Path Tracing, the engine's
+// via.render.ExperimentalRayTrace modes) replaces the ray tracing chain above with one inline ray
+// query compute pass at render size, one shader per bounce count and samples per pixel (no DXR). In
+// RE2 (RE2DLSS, feat/rr-path-tracing): t0 depth, t9 BaseColorMetallic (rgba8 sRGB), t10
+// NormalXNormalYRoughnessMisc (rgb10a2), u0 the scene colour it writes (r11g11b10f), which the TAA
+// then reads. It isn't denoised, and rayTracingUpscale (where Ray Reconstruction found its G-buffer
+// and camera) doesn't run. Recognised by those bindings, each shader checked once so every variant
+// is found; the G-buffer registers are searched (t0..t15) rather than assumed, in case RE4's differ.
+struct PtPass {
+    bool pt = false;
+    uint32_t base = 0, normal = 0;
+};
+std::map<uint32_t, PtPass> g_ptShaders;  // shader id -> verdict; g_rtMutex
+
+const PtPass* RtPathTracePass(device* dev, ListState& s, uint32_t id) {
+    const auto it = g_ptShaders.find(id);
+    if (it != g_ptShaders.end()) return it->second.pt ? &it->second : nullptr;
+    const resource out = ComputeView(dev, s.compute, 0, true);
+    if (!out.handle) return nullptr;  // nothing bound: decide another time
+    const resource_desc od = dev->get_resource_desc(out);
+    PtPass v;
+    if (od.type == resource_type::texture_2d && od.texture.format == format::r11g11b10_float && od.texture.width >= 640) {
+        int baseReg = -1, normalReg = -1;
+        for (uint32_t reg = 0; reg < 16 && (baseReg < 0 || normalReg < 0); ++reg) {
+            const resource r = ComputeView(dev, s.compute, reg, false);
+            if (!r.handle) continue;
+            const resource_desc d = dev->get_resource_desc(r);
+            if (d.type != resource_type::texture_2d || d.texture.width != od.texture.width || d.texture.height != od.texture.height)
+                continue;
+            const format f = d.texture.format;
+            if (baseReg < 0 && (f == format::r8g8b8a8_unorm_srgb || f == format::r8g8b8a8_unorm || f == format::r8g8b8a8_typeless))
+                baseReg = static_cast<int>(reg);
+            else if (normalReg < 0 && (f == format::r10g10b10a2_unorm || f == format::r10g10b10a2_typeless))
+                normalReg = static_cast<int>(reg);
+        }
+        if (baseReg >= 0 && normalReg >= 0) {
+            v.pt = true, v.base = static_cast<uint32_t>(baseReg), v.normal = static_cast<uint32_t>(normalReg);
+            Log("path tracing pass cs%08x: %ux%u, G-buffer t%u/t%u: Ray Reconstruction denoises it", id, od.texture.width,
+                od.texture.height, v.base, v.normal);
+        }
+    }
+    const auto ins = g_ptShaders.emplace(id, v).first;
+    return v.pt ? &ins->second : nullptr;
+}
+
 // Every compute dispatch: notes the signals and the G-buffer, skips the game's denoise passes, and
 // copies the signals in before rayTracingUpscale. True: the dispatch is skipped.
 bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
@@ -868,6 +944,32 @@ bool RtOnDispatch(command_list* cl, ListState& s, uint32_t id) {
         case kRtSpatialSpecular: if (!raw) note(kSpecularSlot, ComputeView(dev, s.compute, 0, true)); break;
         case kRtSpatialVfx: if (!raw) note(3, ComputeView(dev, s.compute, 0, true)); break;
         default: break;
+    }
+    if (!upscalePass) {
+        if (const PtPass* pt = RtPathTracePass(dev, s, id)) {
+            // The path traced lighting is the scene colour the TAA reads: Ray Reconstruction denoises it
+            // there, with guides from the G-buffer the path tracer reads, and its camera (SceneInfo, b0).
+            static bool logged = false;
+            if (!logged) logged = true, Log("Ray Reconstruction: the game path traces");
+            g_rt.upscaleFrame = frame;
+            g_ptFrame = frame;
+            g_rt.base = ComputeView(dev, s.compute, pt->base, false);
+            g_rt.normal = ComputeView(dev, s.compute, pt->normal, false);
+            // Its b0 is SceneInfo only some of the time in RE4: a read is taken only when it looks
+            // right (else the SceneInfo search in OnPushDescriptors gives the camera this frame).
+            if (g_rt.sceneFrame != frame) {
+                std::string how;
+                float f[kSceneInfoBytes / 4];
+                if (ReadCb0(dev, s.compute, kSceneInfoBytes, f, &how) && LooksLikeSceneInfo(f, g_sceneW.load(), g_sceneH.load())) {
+                    memcpy(g_rt.scene, f, sizeof(f));
+                    g_rt.sceneFrame = frame;
+                    g_rtSceneSeen = frame;
+                    static bool loggedPtCam = false;
+                    if (!loggedPtCam) loggedPtCam = true, Log("Ray Reconstruction: camera from the path tracing pass's b0");
+                }
+            }
+            return false;
+        }
     }
     const bool skipping = RtSkipping(frame);
     if (id == kRtUpscale || id == kRtUpscaleGi) {
@@ -1478,7 +1580,12 @@ bool SecondaryView(command_list* cl, ListState& s) {
     while (area > now && !g_viewAreaNow.compare_exchange_weak(now, area)) {}
     const uint64_t largest = std::max<uint64_t>(std::max<uint64_t>(now, area), g_viewAreaBefore.load());
     const bool secondary = area < largest || outW * 2 <= bw || outH * 2 <= bh;
-    if (!secondary) g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
+    if (!secondary) {
+        g_mainRenderW = cb[kRenderSize];  // the ray tracing passes tell the views apart by it
+        // What SceneInfo must say (frame generation set it only while on; path tracing's camera
+        // check needs it too).
+        g_sceneW = cb[kRenderSize], g_sceneH = cb[kRenderSize + 1];
+    }
     if (secondary) {
         FrameGenNoteSecondView();
         // Each size once: the scope's view switches between two sizes from frame to frame.

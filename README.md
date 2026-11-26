@@ -57,7 +57,11 @@ support, and REFramework for the render resolution dropdown.
   Reconstruction gets (colour, reflectivity, normals, roughness). Without ray tracing (menus, some
   cutscenes, or ray tracing off) it uses Super Resolution. Also works when a mod turns on the
   game's hidden ray-traced global illumination (such as the RE4R Graphics Enhancement REFramework
-  script): Ray Reconstruction then gets the GI as well as the reflections.
+  script): Ray Reconstruction then gets the GI as well as the reflections. With REFramework's path
+  tracing (Graphics > Ray Tracing Tweaks: Pure or Hybrid Path Tracing), Ray Reconstruction denoises
+  the path traced picture: the path tracing pass is recognised by its bindings, its G-buffer feeds
+  the guides, and the camera comes from that pass's SceneInfo when it is one, else from the
+  SceneInfo search (only while path tracing).
 
 Settings are in ReShade's Add-ons tab (Home key) under RE4DLSS, saved in `ReShade.ini` under
 `[RE4DLSS]`.
