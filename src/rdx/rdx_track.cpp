@@ -5,6 +5,7 @@
 #include "rdx.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <unordered_set>
@@ -204,7 +205,9 @@ namespace {
 std::shared_mutex g_resMutex;
 std::unordered_map<ID3D12Resource*, ResInfo> g_res;
 std::unordered_set<ID3D12Resource*> g_dead;
-std::map<uint64_t, std::pair<ID3D12Resource*, uint64_t>> g_vas;  // buffer GPU address -> (buffer, size)
+// Buffer GPU address -> (buffer, size). A multimap: placed buffers can alias, starting at the same
+// address or inside a larger one (RE4's constant buffers), so every buffer keeps its own entry.
+std::multimap<uint64_t, std::pair<ID3D12Resource*, uint64_t>> g_vas;
 
 void ResourceGone(void* object, void* ctx) {
     ID3D12Resource* r = static_cast<ID3D12Resource*>(object);
@@ -214,8 +217,12 @@ void ResourceGone(void* object, void* ctx) {
     auto it = g_res.find(r);
     if (it != g_res.end()) {
         if (it->second.va) {
-            auto v = g_vas.find(it->second.va);
-            if (v != g_vas.end() && v->second.first == r) g_vas.erase(v);
+            auto [b, e] = g_vas.equal_range(it->second.va);
+            for (auto v = b; v != e; ++v)
+                if (v->second.first == r) {
+                    g_vas.erase(v);
+                    break;
+                }
         }
         g_res.erase(it);
     }
@@ -236,9 +243,18 @@ void TrackResource(ID3D12Resource* r, bool fireEvents, D3D12_RESOURCE_STATES ini
     if (d.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) info.va = r->GetGPUVirtualAddress();
     {
         std::unique_lock<std::shared_mutex> lock(g_resMutex);
+        auto old = g_res.find(r);
+        if (old != g_res.end() && old->second.va) {  // tracked again (same pointer): drop its old entry
+            auto [b, e] = g_vas.equal_range(old->second.va);
+            for (auto v = b; v != e; ++v)
+                if (v->second.first == r) {
+                    g_vas.erase(v);
+                    break;
+                }
+        }
         g_res[r] = info;
         g_dead.erase(r);
-        if (info.va) g_vas[info.va] = {r, d.Width};
+        if (info.va) g_vas.emplace(info.va, std::make_pair(r, static_cast<uint64_t>(d.Width)));
     }
     OnDestroyed(r, &ResourceGone, fireEvents ? reinterpret_cast<void*>(1) : nullptr);
     if (fireEvents)
@@ -270,12 +286,30 @@ void MarkAlive(ID3D12Resource* r) {
 
 ID3D12Resource* ResourceAtVa(uint64_t va, uint64_t* offset) {
     std::shared_lock<std::shared_mutex> lock(g_resMutex);
+    // The buffers starting at or below va, nearest first: the first that covers va (an aliased
+    // buffer can sit inside a larger one, so the nearest start alone isn't enough). Bounded walk.
     auto it = g_vas.upper_bound(va);
-    if (it == g_vas.begin()) return nullptr;
-    --it;
-    if (va - it->first >= it->second.second) return nullptr;
-    if (offset) *offset = va - it->first;
-    return it->second.first;
+    for (int n = 0; it != g_vas.begin() && n < 4096; ++n) {
+        --it;
+        if (va - it->first < it->second.second) {
+            if (offset) *offset = va - it->first;
+            return it->second.first;
+        }
+    }
+    static std::atomic<int> misses{0};
+    if (va && misses.fetch_add(1) < 5) {
+        auto below = g_vas.upper_bound(va);
+        if (below != g_vas.begin()) {
+            --below;
+            Log("GPU address %llx in no known buffer (%zu buffers; nearest below starts at %llx, %llu bytes)",
+                static_cast<unsigned long long>(va), g_vas.size(), static_cast<unsigned long long>(below->first),
+                static_cast<unsigned long long>(below->second.second));
+        } else {
+            Log("GPU address %llx in no known buffer (%zu buffers, none below)", static_cast<unsigned long long>(va),
+                g_vas.size());
+        }
+    }
+    return nullptr;
 }
 
 resource_desc DescOf(ID3D12Resource* r) {

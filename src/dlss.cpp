@@ -18,6 +18,9 @@
 #include <mutex>
 #include <vector>
 
+// rdx_api.cpp: D3D12's own object under another layer's proxy (ReShade's), else the object itself.
+void* rdx_Native(void* obj, REFIID iid);
+
 namespace dlss {
 namespace {
 
@@ -173,6 +176,7 @@ bool CreateFeature(ID3D12GraphicsCommandList* list, const Inputs& in, Feature& f
 }  // namespace
 
 bool Init(ID3D12Device* device, std::string& error) {
+    device = static_cast<ID3D12Device*>(rdx_Native(device, __uuidof(ID3D12Device)));  // under ReShade's proxy (rdx_api.cpp)
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_initTried) {
         error = g_initError;
@@ -248,6 +252,7 @@ int AutoPreset(unsigned renderW, unsigned outputW) {
 }
 
 bool Evaluate(ID3D12GraphicsCommandList* list, const Inputs& requested, std::string& error) {
+    list = static_cast<ID3D12GraphicsCommandList*>(rdx_Native(list, __uuidof(ID3D12GraphicsCommandList)));
     Inputs in = requested;
     if (in.preset == kPresetAuto) in.preset = AutoPreset(in.renderWidth, in.outputWidth);
     std::lock_guard<std::mutex> lock(g_mutex);

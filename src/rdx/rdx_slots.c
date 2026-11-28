@@ -72,6 +72,8 @@ void RdxFillSlots(int* s) {
     s[kListSetGraphicsRootUnorderedAccessView] = SLOT(ID3D12GraphicsCommandListVtbl, SetGraphicsRootUnorderedAccessView);
     s[kListOMSetRenderTargets] = SLOT(ID3D12GraphicsCommandListVtbl, OMSetRenderTargets);
     s[kListExecuteIndirect] = SLOT(ID3D12GraphicsCommandListVtbl, ExecuteIndirect);
+    s[kListClearUnorderedAccessViewUint] = SLOT(ID3D12GraphicsCommandListVtbl, ClearUnorderedAccessViewUint);
+    s[kListClearUnorderedAccessViewFloat] = SLOT(ID3D12GraphicsCommandListVtbl, ClearUnorderedAccessViewFloat);
 
     s[kQueueExecuteCommandLists] = SLOT(ID3D12CommandQueueVtbl, ExecuteCommandLists);
 

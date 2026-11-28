@@ -291,6 +291,36 @@ void STDMETHODCALLTYPE HkExecuteIndirect(ID3D12GraphicsCommandList* l, ID3D12Com
     O<decltype(&HkExecuteIndirect)>(l, kListExecuteIndirect)(l, sig, max, args, argOffset, count, countOffset);
 }
 
+// Diagnostics (RE4 2.0: NGX's first evaluate crashed in ReShade decoding a UAV clear's CPU handle):
+// who calls the clears, with what handles, on which list class.
+HMODULE ModuleAt(void* p);
+const char* ModuleName(void* p, char* buf) {
+    strcpy(buf, "no module");
+    if (HMODULE m = ModuleAt(p)) GetModuleFileNameA(m, buf, MAX_PATH);
+    const char* s = strrchr(buf, '\\');
+    return s ? s + 1 : buf;
+}
+void LogClear(const char* what, ID3D12GraphicsCommandList* l, void* caller, D3D12_GPU_DESCRIPTOR_HANDLE gpu,
+              D3D12_CPU_DESCRIPTOR_HANDLE cpu) {
+    if (FromGame(caller)) return;
+    static std::atomic<int> logged{0};
+    if (logged.fetch_add(1) >= 8) return;
+    char a[MAX_PATH], b[MAX_PATH];
+    Log("%s from %s: gpu %llx cpu %llx, list %p (vtable in %s)", what, ModuleName(caller, a),
+        static_cast<unsigned long long>(gpu.ptr), static_cast<unsigned long long>(cpu.ptr), static_cast<void*>(l),
+        ModuleName(*reinterpret_cast<void**>(l), b));
+}
+void STDMETHODCALLTYPE HkClearUavUint(ID3D12GraphicsCommandList* l, D3D12_GPU_DESCRIPTOR_HANDLE gpu, D3D12_CPU_DESCRIPTOR_HANDLE cpu,
+                                      ID3D12Resource* r, const UINT* v, UINT n, const D3D12_RECT* rects) {
+    LogClear("ClearUnorderedAccessViewUint", l, _ReturnAddress(), gpu, cpu);
+    O<decltype(&HkClearUavUint)>(l, kListClearUnorderedAccessViewUint)(l, gpu, cpu, r, v, n, rects);
+}
+void STDMETHODCALLTYPE HkClearUavFloat(ID3D12GraphicsCommandList* l, D3D12_GPU_DESCRIPTOR_HANDLE gpu, D3D12_CPU_DESCRIPTOR_HANDLE cpu,
+                                       ID3D12Resource* r, const FLOAT* v, UINT n, const D3D12_RECT* rects) {
+    LogClear("ClearUnorderedAccessViewFloat", l, _ReturnAddress(), gpu, cpu);
+    O<decltype(&HkClearUavFloat)>(l, kListClearUnorderedAccessViewFloat)(l, gpu, cpu, r, v, n, rects);
+}
+
 void STDMETHODCALLTYPE HkCopyBufferRegion(ID3D12GraphicsCommandList* l, ID3D12Resource* dst, UINT64 dof, ID3D12Resource* src, UINT64 so,
                                           UINT64 n) {
     if (GAME)
@@ -534,7 +564,9 @@ void HookList(void* list) {
                  {kListSetComputeRootUnorderedAccessView, P(&HkComputeUav)},
                  {kListSetGraphicsRootUnorderedAccessView, P(&HkGraphicsUav)},
                  {kListOMSetRenderTargets, P(&HkSetTargets)},
-                 {kListExecuteIndirect, P(&HkExecuteIndirect)}});
+                 {kListExecuteIndirect, P(&HkExecuteIndirect)},
+                 {kListClearUnorderedAccessViewUint, P(&HkClearUavUint)},
+                 {kListClearUnorderedAccessViewFloat, P(&HkClearUavFloat)}});
 }
 
 void ListGone(void* object, void* ctx) {
@@ -661,6 +693,17 @@ HRESULT STDMETHODCALLTYPE HkCreateLib(ID3D12Device1* d, const void* blob, SIZE_T
 HRESULT STDMETHODCALLTYPE HkCreateHeap(ID3D12Device* d, const D3D12_DESCRIPTOR_HEAP_DESC* desc, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCreateHeap)>(d, kDevCreateDescriptorHeap)(d, desc, riid, out);
+    if (SUCCEEDED(hr) && out && *out && !game) {  // diagnostics: others' heaps (NGX's)
+        static std::atomic<int> logged{0};
+        ID3D12DescriptorHeap* h = nullptr;
+        if (logged.fetch_add(1) < 12 && SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&h)))) {
+            char a[MAX_PATH], b[MAX_PATH];
+            Log("descriptor heap from %s: type %d, %u descriptors, flags %d, cpu start %llx (device vtable in %s)",
+                ModuleName(_ReturnAddress(), a), desc->Type, desc->NumDescriptors, desc->Flags,
+                static_cast<unsigned long long>(h->GetCPUDescriptorHandleForHeapStart().ptr), ModuleName(*reinterpret_cast<void**>(d), b));
+            h->Release();
+        }
+    }
     if (SUCCEEDED(hr) && out && *out && game) {
         ID3D12DescriptorHeap* h = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&h)))) {
@@ -833,19 +876,33 @@ void STDMETHODCALLTYPE HkCopyDescsSimple(ID3D12Device* d, UINT n, D3D12_CPU_DESC
     if (game) CopySlots(dst.ptr, src.ptr, n, 0);
 }
 
-void NewResource(void** out, bool game, D3D12_RESOURCE_STATES state) {
-    if (!game || !out || !*out) return;
+HMODULE ModuleAt(void* p);
+
+// Every resource made on the game's device is tracked (its description and, for buffers, its GPU
+// address: root CBVs resolve through it), whoever creates it: RE4 creates most of its buffers from
+// code outside re4.exe's image. init_resource/destroy_resource fire only for the game's own calls.
+void NewResource(void** out, bool game, void* caller, D3D12_RESOURCE_STATES state) {
+    if (!out || !*out) return;
     ID3D12Resource* r = nullptr;
     if (FAILED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&r)))) return;
     r->Release();
-    TrackResource(r, true, state);
+    if (!game) {
+        static std::atomic<int> logged{0};
+        if (logged.fetch_add(1) < 4) {
+            char by[MAX_PATH] = "no module";
+            if (HMODULE m = ModuleAt(caller)) GetModuleFileNameA(m, by, MAX_PATH);
+            Log("resource created from outside the game exe (%p, %s): tracked without events", caller,
+                strrchr(by, '\\') ? strrchr(by, '\\') + 1 : by);
+        }
+    }
+    TrackResource(r, game, state);
 }
 
 HRESULT STDMETHODCALLTYPE HkCommitted(ID3D12Device* d, const D3D12_HEAP_PROPERTIES* hp, D3D12_HEAP_FLAGS f, const D3D12_RESOURCE_DESC* desc,
                                       D3D12_RESOURCE_STATES s, const D3D12_CLEAR_VALUE* c, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCommitted)>(d, kDevCreateCommittedResource)(d, hp, f, desc, s, c, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -853,7 +910,7 @@ HRESULT STDMETHODCALLTYPE HkPlaced(ID3D12Device* d, ID3D12Heap* heap, UINT64 off
                                    const D3D12_CLEAR_VALUE* c, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkPlaced)>(d, kDevCreatePlacedResource)(d, heap, off, desc, s, c, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -861,7 +918,7 @@ HRESULT STDMETHODCALLTYPE HkReserved(ID3D12Device* d, const D3D12_RESOURCE_DESC*
                                      REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkReserved)>(d, kDevCreateReservedResource)(d, desc, s, c, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -870,7 +927,7 @@ HRESULT STDMETHODCALLTYPE HkCommitted1(ID3D12Device4* d, const D3D12_HEAP_PROPER
                                        void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCommitted1)>(d, kDevCreateCommittedResource1)(d, hp, f, desc, s, c, ps, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -878,7 +935,7 @@ HRESULT STDMETHODCALLTYPE HkReserved1(ID3D12Device4* d, const D3D12_RESOURCE_DES
                                       ID3D12ProtectedResourceSession* ps, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkReserved1)>(d, kDevCreateReservedResource1)(d, desc, s, c, ps, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -887,7 +944,7 @@ HRESULT STDMETHODCALLTYPE HkCommitted2(ID3D12Device8* d, const D3D12_HEAP_PROPER
                                        void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCommitted2)>(d, kDevCreateCommittedResource2)(d, hp, f, desc, s, c, ps, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -895,7 +952,7 @@ HRESULT STDMETHODCALLTYPE HkPlaced1(ID3D12Device8* d, ID3D12Heap* heap, UINT64 o
                                     const D3D12_CLEAR_VALUE* c, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkPlaced1)>(d, kDevCreatePlacedResource1)(d, heap, off, desc, s, c, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, s);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), s);
     return hr;
 }
 
@@ -904,7 +961,7 @@ HRESULT STDMETHODCALLTYPE HkCommitted3(ID3D12Device10* d, const D3D12_HEAP_PROPE
                                        const DXGI_FORMAT* cf, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCommitted3)>(d, kDevCreateCommittedResource3)(d, hp, f, desc, layout, c, ps, nc, cf, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, D3D12_RESOURCE_STATE_COMMON);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), D3D12_RESOURCE_STATE_COMMON);
     return hr;
 }
 
@@ -912,7 +969,7 @@ HRESULT STDMETHODCALLTYPE HkPlaced2(ID3D12Device10* d, ID3D12Heap* heap, UINT64 
                                     const D3D12_CLEAR_VALUE* c, UINT nc, const DXGI_FORMAT* cf, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkPlaced2)>(d, kDevCreatePlacedResource2)(d, heap, off, desc, layout, c, nc, cf, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, D3D12_RESOURCE_STATE_COMMON);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), D3D12_RESOURCE_STATE_COMMON);
     return hr;
 }
 
@@ -920,7 +977,7 @@ HRESULT STDMETHODCALLTYPE HkReserved2(ID3D12Device10* d, const D3D12_RESOURCE_DE
                                       ID3D12ProtectedResourceSession* ps, UINT nc, const DXGI_FORMAT* cf, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkReserved2)>(d, kDevCreateReservedResource2)(d, desc, layout, c, ps, nc, cf, riid, out);
-    if (SUCCEEDED(hr)) NewResource(out, game, D3D12_RESOURCE_STATE_COMMON);
+    if (SUCCEEDED(hr)) NewResource(out, game, _ReturnAddress(), D3D12_RESOURCE_STATE_COMMON);
     return hr;
 }
 
@@ -1165,7 +1222,9 @@ HRESULT WINAPI HkD3D12CreateDevice(IUnknown* adapter, D3D_FEATURE_LEVEL fl, REFI
     OnDestroyed(d, &DeviceGone, nullptr);
     char by[MAX_PATH] = "?";
     if (HMODULE m = ModuleAt(caller)) GetModuleFileNameA(m, by, MAX_PATH);
-    Log("game's D3D12 device %p (created by %s)", static_cast<void*>(d), strrchr(by, '\\') ? strrchr(by, '\\') + 1 : by);
+    char vt[MAX_PATH];
+    Log("game's D3D12 device %p (created by %s, vtable in %s)", static_cast<void*>(d), strrchr(by, '\\') ? strrchr(by, '\\') + 1 : by,
+        ModuleName(*reinterpret_cast<void**>(d), vt));
     Invoke<addon_event::init_device>(Dev());
     return hr;
 }

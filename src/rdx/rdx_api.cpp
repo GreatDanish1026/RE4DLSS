@@ -981,3 +981,57 @@ color_space Swapchain::get_color_space() const {
 }
 
 }  // namespace rdx
+
+// ---------------------------------------------------------------- unwrapping another layer's proxies
+//
+// With ReShade installed, the game's device and command lists are ReShade's proxies (rdx sits above
+// ReShade). NVIDIA's DLSS mixes them with the real objects underneath: it makes its descriptor heaps
+// on the real device and then clears UAVs through the proxy list, whose CPU handle decoding then
+// crashes (RE4). NGX gets the real objects instead, as with 1.x inside ReShade. The real object is
+// the pointer in the proxy whose vtable belongs to D3D12 itself and that answers the same interface.
+
+namespace {
+
+bool InD3D12(const void* p) {
+    HMODULE m = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            static_cast<LPCWSTR>(p), &m) || !m)
+        return false;
+    wchar_t path[MAX_PATH] = {};
+    GetModuleFileNameW(m, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\');
+    name = name ? name + 1 : path;
+    return _wcsicmp(name, L"D3D12Core.dll") == 0 || _wcsicmp(name, L"d3d12.dll") == 0;
+}
+
+// Reads p[i] (an object field) and that pointer's vtable without crashing on a bad candidate.
+void* FieldVtable(void* const* p, int i, void** field) {
+    __try {
+        void* f = p[i];
+        *field = f;
+        if (reinterpret_cast<uintptr_t>(f) < 0x10000 || (reinterpret_cast<uintptr_t>(f) & 7)) return nullptr;
+        return *static_cast<void**>(f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+}  // namespace
+
+void* rdx_Native(void* obj, REFIID iid) {
+    if (!obj) return obj;
+    if (InD3D12(*static_cast<void**>(obj))) return obj;  // already D3D12's own
+    static std::atomic<int> logged{0};
+    for (int i = 1; i < 48; ++i) {
+        void* f = nullptr;
+        void* vt = FieldVtable(static_cast<void* const*>(obj), i, &f);
+        if (!vt || !InD3D12(vt)) continue;
+        IUnknown* q = nullptr;
+        if (FAILED(static_cast<IUnknown*>(f)->QueryInterface(iid, reinterpret_cast<void**>(&q))) || !q) continue;
+        q->Release();
+        if (logged.fetch_add(1) < 4) rdx::Log("NGX gets D3D12's own object %p under the proxy %p (field %d)", static_cast<void*>(q), obj, i);
+        return q;
+    }
+    if (logged.fetch_add(1) < 4) rdx::Log("no D3D12 object found under %p: NGX gets it as it is", obj);
+    return obj;
+}
