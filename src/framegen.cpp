@@ -50,6 +50,16 @@
 #include "ui_alpha_cs.h"  // kUiAlphaCs: ui_alpha.hlsl compiled by build.ps1
 #include "version.h"
 
+namespace rdx {  // rdx_hooks.cpp: the game's swapchain creation (see HookFactory)
+void SetSwapchainCreators(HRESULT(STDMETHODCALLTYPE* create)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**),
+                          HRESULT(STDMETHODCALLTYPE* createForHwnd)(IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+                                                                    const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**),
+                          HRESULT(STDMETHODCALLTYPE** origCreate)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**),
+                          HRESULT(STDMETHODCALLTYPE** origCreateForHwnd)(IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+                                                                         const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*,
+                                                                         IDXGISwapChain1**));
+}
+
 using namespace reshade::api;
 
 namespace rd {
@@ -600,7 +610,7 @@ void LatencyTick() {
 // Measured 2026-11-25 (RE4DLSS 1.4.6): the game reads input on its game thread right after the
 // render thread starts the previous frame, so with Reflex's wait on the render thread the wait sat
 // between reading a frame's input and drawing it. The wait now happens on the game thread at the
-// start of its frame, right before the engine's input update: the RE4DLSS_Reflex plugin for
+// start of its frame, right before the engine's input update: REFramework (RE4DLSS is its plugin) for
 // REFramework calls RE4DLSS_GameFrameStart there (every input device); without it, the
 // controller poll (re4.exe imports XInputGetState by ordinal: XINPUT1_4 #2, once a game frame)
 // stands in; without either, the render thread waits as before. Tested: input -> GPU done about
@@ -1184,23 +1194,11 @@ HRESULT STDMETHODCALLTYPE HookCreateForHwnd(IDXGIFactory2* f, IUnknown* dev, HWN
     return hr;
 }
 
-// Hooks the system DXGI factory's vtable (shared by every factory, ReShade's hooks included).
-bool HookFactory(std::string& error) {
-    wchar_t sys[MAX_PATH] = {};
-    GetSystemDirectoryW(sys, MAX_PATH);
-    HMODULE dxgi = LoadLibraryW((std::wstring(sys) + L"\\dxgi.dll").c_str());
-    using CreateFactory2 = HRESULT(WINAPI*)(UINT, REFIID, void**);
-    auto create = dxgi ? reinterpret_cast<CreateFactory2>(GetProcAddress(dxgi, "CreateDXGIFactory2")) : nullptr;
-    IDXGIFactory2* factory = nullptr;
-    if (!create || FAILED(create(0, IID_PPV_ARGS(&factory)))) {
-        error = "couldn't create a DXGI factory";
-        return false;
-    }
-    const bool ok = Patch(factory, 10, reinterpret_cast<void*>(&HookCreateSwapChain), reinterpret_cast<void**>(&g_createSwapChain)) &&
-                    Patch(factory, 15, reinterpret_cast<void*>(&HookCreateForHwnd), reinterpret_cast<void**>(&g_createForHwnd));
-    factory->Release();
-    if (!ok) error = "couldn't hook swapchain creation";
-    return ok;
+// 2.0: the system DXGI factory's swapchain creation is hooked by the rdx layer (rdx_hooks.cpp);
+// it hands the game's swapchain creation to these (g_create* get the unhooked creation).
+bool HookFactory(std::string&) {
+    rdx::SetSwapchainCreators(&HookCreateSwapChain, &HookCreateForHwnd, &g_createSwapChain, &g_createForHwnd);
+    return true;
 }
 
 // ---------------------------------------------------------------- Streamline
@@ -1960,7 +1958,7 @@ void DrawFrameGenAdvanced() {
         Log("settings: Reflex wait before input %s", g_set.reflexAtInput ? "on" : "off");
     }
     Help("With DLSS frame generation (on by default): Reflex's wait happens on the game's own thread right before it "
-         "reads input (keyboard and mouse, controllers), through the RE4DLSS_Reflex plugin for REFramework, instead of on "
+         "reads input (keyboard and mouse, controllers), through REFramework (RE4DLSS is its plugin), instead of on "
          "the render thread after the game has already read the frame's input. In testing it cut the time from input to "
          "the finished frame by about 14 ms. Off: the wait on the render thread, as before 1.4.6. Switches right away.");
 }
@@ -2011,13 +2009,13 @@ void DrawFrameGenStatus() {
 }
 
 
-// Called by RE4DLSS_Reflex.dll (REFramework plugin) on the game thread around the engine's input
+// Called by RE4DLSS's REFramework plugin entry (refplugin.cpp) on the game thread around the engine's input
 // update: the game's frame starts, and its input has been read.
 extern "C" __declspec(dllexport) void RE4DLSS_GameFrameStart() {
     g_refFrameAt = Now();
     if (!g_refLogged) {
         g_refLogged = true;
-        Log("Reflex at input: frame start from REFramework's input update (RE4DLSS_Reflex plugin), thread %lu",
+        Log("Reflex at input: frame start from REFramework's input update, thread %lu",
             static_cast<unsigned long>(GetCurrentThreadId()));
     }
     g_refToken = GameFrameStart();

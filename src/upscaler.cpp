@@ -43,7 +43,7 @@
 #include <vector>
 #include <algorithm>
 
-#include "../third_party/reshade/utils/descriptor_tracking.hpp"
+#include <descriptor_tracking.hpp>  // rdx's (src/rdx)
 #include "dlss.hpp"
 #include "fsr.hpp"
 #include "guide_cs.h"       // kGuideCs: guide.hlsl (Ray Reconstruction guides from the G-buffer)

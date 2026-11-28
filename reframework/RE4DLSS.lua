@@ -1,6 +1,6 @@
 -- RE4DLSS companion script (REFramework autorun).
 -- Sets the render size of Resident Evil 4's FSR 2 to the render resolution chosen in the RE4DLSS
--- ReShade overlay, including Native (100%), which the game's menu doesn't offer: with it, DLSS
+-- settings (REFramework menu, RE4DLSS section), including Native (100%), which the game's menu doesn't offer: with it, DLSS
 -- runs as DLAA and FSR 3/4 as native anti-aliasing. The engine keeps FSR 2's quality in
 -- via.render.UpscalingInterface.UpscalingQuality: 0 = native, 1 = Quality, 2 = Balanced,
 -- 3 = Performance, 4 = Ultra Performance. The add-on writes the wanted value (-1 = leave the game's

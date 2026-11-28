@@ -1,13 +1,17 @@
 Third-party notices
 ===================
 
-RE4DLSS.addon64 is compiled against the following headers, which are
-included in the source repository under third_party/.
+RE4DLSS.dll (a REFramework plugin) is compiled against the following headers,
+which are included in the source repository under third_party/.
 
 ----------------------------------------------------------------------------
 ReShade add-on API headers (third_party/reshade/include)
 https://github.com/crosire/reshade
 ----------------------------------------------------------------------------
+Since 2.0 RE4DLSS doesn't need ReShade: its own D3D12 hook layer (src/rdx)
+serves ReShade's add-on API types and events, which the add-on code is
+written against.
+
 Copyright 2014 Patrick Mours. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -49,8 +53,15 @@ SOFTWARE.
 ReShade descriptor tracking (third_party/reshade/utils)
 ----------------------------------------------------------------------------
 From ReShade 6.8.0 examples/utils, Copyright (C) 2021 Patrick Mours,
-BSD-3-Clause OR MIT (see third_party/reshade/LICENSE.md). Modified (see the
-note at the top of descriptor_tracking.cpp).
+BSD-3-Clause OR MIT (see third_party/reshade/LICENSE.md). Since 2.0 only its
+interface is kept (src/rdx/descriptor_tracking.hpp), served by src/rdx.
+
+----------------------------------------------------------------------------
+REFramework (https://github.com/praydog/REFramework)
+----------------------------------------------------------------------------
+Not included. RE4DLSS is a plugin for it: the plugin API structures it uses
+are declared in src/refplugin.cpp, and its settings are drawn with the Dear
+ImGui functions REFramework exports (cimgui).
 
 ----------------------------------------------------------------------------
 NVIDIA DLSS SDK 310.9.16 (third_party/dlss)
