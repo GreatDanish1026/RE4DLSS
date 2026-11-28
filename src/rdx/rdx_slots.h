@@ -66,8 +66,6 @@ enum RdxSlot {
     kListSetGraphicsRootUnorderedAccessView,
     kListOMSetRenderTargets,
     kListExecuteIndirect,
-    kListClearUnorderedAccessViewUint,
-    kListClearUnorderedAccessViewFloat,
     /* ID3D12CommandQueue */
     kQueueExecuteCommandLists,
     /* IDXGIFactory2 */

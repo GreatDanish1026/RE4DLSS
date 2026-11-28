@@ -291,8 +291,7 @@ void STDMETHODCALLTYPE HkExecuteIndirect(ID3D12GraphicsCommandList* l, ID3D12Com
     O<decltype(&HkExecuteIndirect)>(l, kListExecuteIndirect)(l, sig, max, args, argOffset, count, countOffset);
 }
 
-// Diagnostics (RE4 2.0: NGX's first evaluate crashed in ReShade decoding a UAV clear's CPU handle):
-// who calls the clears, with what handles, on which list class.
+// A module's file name (logs).
 HMODULE ModuleAt(void* p);
 const char* ModuleName(void* p, char* buf) {
     strcpy(buf, "no module");
@@ -300,27 +299,6 @@ const char* ModuleName(void* p, char* buf) {
     const char* s = strrchr(buf, '\\');
     return s ? s + 1 : buf;
 }
-void LogClear(const char* what, ID3D12GraphicsCommandList* l, void* caller, D3D12_GPU_DESCRIPTOR_HANDLE gpu,
-              D3D12_CPU_DESCRIPTOR_HANDLE cpu) {
-    if (FromGame(caller)) return;
-    static std::atomic<int> logged{0};
-    if (logged.fetch_add(1) >= 8) return;
-    char a[MAX_PATH], b[MAX_PATH];
-    Log("%s from %s: gpu %llx cpu %llx, list %p (vtable in %s)", what, ModuleName(caller, a),
-        static_cast<unsigned long long>(gpu.ptr), static_cast<unsigned long long>(cpu.ptr), static_cast<void*>(l),
-        ModuleName(*reinterpret_cast<void**>(l), b));
-}
-void STDMETHODCALLTYPE HkClearUavUint(ID3D12GraphicsCommandList* l, D3D12_GPU_DESCRIPTOR_HANDLE gpu, D3D12_CPU_DESCRIPTOR_HANDLE cpu,
-                                      ID3D12Resource* r, const UINT* v, UINT n, const D3D12_RECT* rects) {
-    LogClear("ClearUnorderedAccessViewUint", l, _ReturnAddress(), gpu, cpu);
-    O<decltype(&HkClearUavUint)>(l, kListClearUnorderedAccessViewUint)(l, gpu, cpu, r, v, n, rects);
-}
-void STDMETHODCALLTYPE HkClearUavFloat(ID3D12GraphicsCommandList* l, D3D12_GPU_DESCRIPTOR_HANDLE gpu, D3D12_CPU_DESCRIPTOR_HANDLE cpu,
-                                       ID3D12Resource* r, const FLOAT* v, UINT n, const D3D12_RECT* rects) {
-    LogClear("ClearUnorderedAccessViewFloat", l, _ReturnAddress(), gpu, cpu);
-    O<decltype(&HkClearUavFloat)>(l, kListClearUnorderedAccessViewFloat)(l, gpu, cpu, r, v, n, rects);
-}
-
 void STDMETHODCALLTYPE HkCopyBufferRegion(ID3D12GraphicsCommandList* l, ID3D12Resource* dst, UINT64 dof, ID3D12Resource* src, UINT64 so,
                                           UINT64 n) {
     if (GAME)
@@ -564,9 +542,7 @@ void HookList(void* list) {
                  {kListSetComputeRootUnorderedAccessView, P(&HkComputeUav)},
                  {kListSetGraphicsRootUnorderedAccessView, P(&HkGraphicsUav)},
                  {kListOMSetRenderTargets, P(&HkSetTargets)},
-                 {kListExecuteIndirect, P(&HkExecuteIndirect)},
-                 {kListClearUnorderedAccessViewUint, P(&HkClearUavUint)},
-                 {kListClearUnorderedAccessViewFloat, P(&HkClearUavFloat)}});
+                 {kListExecuteIndirect, P(&HkExecuteIndirect)}});
 }
 
 void ListGone(void* object, void* ctx) {
@@ -693,17 +669,6 @@ HRESULT STDMETHODCALLTYPE HkCreateLib(ID3D12Device1* d, const void* blob, SIZE_T
 HRESULT STDMETHODCALLTYPE HkCreateHeap(ID3D12Device* d, const D3D12_DESCRIPTOR_HEAP_DESC* desc, REFIID riid, void** out) {
     const bool game = GAME;
     const HRESULT hr = O<decltype(&HkCreateHeap)>(d, kDevCreateDescriptorHeap)(d, desc, riid, out);
-    if (SUCCEEDED(hr) && out && *out && !game) {  // diagnostics: others' heaps (NGX's)
-        static std::atomic<int> logged{0};
-        ID3D12DescriptorHeap* h = nullptr;
-        if (logged.fetch_add(1) < 12 && SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&h)))) {
-            char a[MAX_PATH], b[MAX_PATH];
-            Log("descriptor heap from %s: type %d, %u descriptors, flags %d, cpu start %llx (device vtable in %s)",
-                ModuleName(_ReturnAddress(), a), desc->Type, desc->NumDescriptors, desc->Flags,
-                static_cast<unsigned long long>(h->GetCPUDescriptorHandleForHeapStart().ptr), ModuleName(*reinterpret_cast<void**>(d), b));
-            h->Release();
-        }
-    }
     if (SUCCEEDED(hr) && out && *out && game) {
         ID3D12DescriptorHeap* h = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&h)))) {

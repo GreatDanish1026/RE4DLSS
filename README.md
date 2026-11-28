@@ -112,6 +112,10 @@ If the NVIDIA App has a DLSS model override for the game, it takes precedence ov
 - Tested at 3840x2160 on an NVIDIA RTX card at every FSR 2 quality, and with DLSS frame
   generation 2x; Ray Reconstruction at Quality and Ultra Performance with ray tracing on, and with
   the RE4R Graphics Enhancement and RE4R RELighting scripts (ray-traced GI, AO and shadows on).
+- 2.0 tested at 3840x2160 on an NVIDIA RTX card with ReShade, RenoDX HDR and GITC Uplift installed:
+  DLSS and Ray Reconstruction (Quality, Performance), DLSS frame generation 2x, Reflex at input, the
+  biosensor scope (keeps FSR 2), the settings in REFramework's menu. FSR and FSR frame generation are
+  the same code as 1.4.6; under 2.0 they're untested so far.
 - 2.0 is new code under the hood (its own DirectX 12 hooks in place of ReShade's): if something
   that worked in 1.4.6 doesn't, `RE4DLSS.log` next to `re4.exe` is the place to look, and 1.4.6
   can still be installed instead.
